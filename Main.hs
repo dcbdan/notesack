@@ -39,17 +39,15 @@ data Note = Note {
   noteLocation :: Box
 }
 
--- things related to drawing boxes
-data OutputConfig = OutputConfig
 
+-- things related to drawing boxes
 -- inputs / hot keys / wtvr related to input stuff
-data InputConfig = InputConfig
+data SackConfig = SackConfig
 
 data Env = Env {
-  envDb        :: Database,
-  envVty       :: Vty,
-  envInConfig  :: InputConfig,
-  envOutConfig ::  OutputConfig
+  envDb         :: Database,
+  envVty        :: Vty,
+  envSackConfig :: SackConfig
 }
 
 data State = State View
@@ -60,11 +58,8 @@ askDb = envDb <$> ask
 askVty :: Sack Vty
 askVty = envVty <$> ask
 
-askInConfig :: Sack InputConfig
-askInConfig = envInConfig <$> ask
-
-askOutConfig :: Sack OutputConfig
-askOutConfig = envOutConfig <$> ask
+askSackConfig :: Sack SackConfig
+askSackConfig = envSackConfig <$> ask
 
 getView :: Sack View
 getView = do (State ret) <- get
@@ -79,22 +74,11 @@ main = do args <- getArgs
 
 mainExcept [filename] = do
   vty <- notesackSetup filename
-  let initEnv = Env Database vty InputConfig OutputConfig
+  let initEnv = Env Database vty SackConfig
       initState = State (View 0 (0,0) 0)
   execRWST (sackInteract False) initEnv initState >> return ()  
   notesackShutdown vty  
 mainExcept _ = throwError "Usage: notesack FILE"
-
-
--- Next up: generate a view with a bunch of boxes...
-
--- The database contains:
--- View:
---   ViewId, LocX, LocY, whichSelected
--- ViewNote:
---   ViewId, NoteId, LocX, LocY, Tag
--- Notes:
---   NoteId, Text, DateCreated, DateChanged, Tags, SizeX, SizeY
 
 sackInteract :: Bool -> Sack ()
 sackInteract shouldExit = do
