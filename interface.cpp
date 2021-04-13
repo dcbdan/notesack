@@ -1,5 +1,9 @@
 #include "interface.h"
 #include <stddef.h> // NULL
+#include <string>
+
+// REMOVE THESE
+#include <iostream>
 
 int error = 0;
 sqlite3* db;
@@ -10,12 +14,12 @@ void i_open(const char* filename) {
   int e = sqlite3_open(filename, &db);
   if(e != SQLITE_OK) {
     sqlite3_close(db);
-    error = 1;
+    error = e;
     return;
   }
 
   if(!db){
-    error = 1;
+    error = e;
     return;
   }
 }
@@ -56,29 +60,7 @@ void i_open_and_init(const char* filename) {
   }
 }
 
-//void i_callback_get_row_id(void* v, int num_rows, char** table, char**) {
-//  int& ret = *v;
-//  if(num_rows == 0) {
-//    v = 0; 
-//  }
-//
-//}
-//int i_new_row_id() {
-//  sqlite3_stmt *stmt;
-//  sqlite3_prepare_v2(db,
-//    "SELECT last_insert_rowid() FROM Note LIMIT 1;",
-//    -1,
-//    &stmt,
-//    NULL);
-//  int e = sqlite3_step(stmt);
-//  if(e == SQLITE_ROW) {
-//
-//  }
-//  int ret = sqlite3_column_int(stmt, 0);
-//  
-//}
-//
-//void i_add_note(const char* text, const char* tag, int size_x, int size_y) {
+void i_add_note(const char* text, const char* tag, int size_x, int size_y) {
 //  // add the note to 
 //  //   (1) Note
 //  //   (2) View.ViewId "YYYYMMDD" if such a view exists
@@ -87,16 +69,40 @@ void i_open_and_init(const char* filename) {
 //  // (1)
 //  //  get a new NoteId
 //  int note_id = 0;
-//  int e = sqlite3_exec(db,
-//    "SELECT last_insert_rowid() FROM Note LIMIT 1;", 
-//    &i_callback_get_row_id, 
-//    &note_id,
-//    NULL);
+//  std::function<int(int,int&)> callback = 
+//    [&note_id](int v, int&){ 
+//      note_id = v + 1;
+//      return 0;
+//    };
+//  int e = exec(db,
+//    "SELECT MAX(NoteId) FROM Note;", 
+//    note_id,
+//    callback);
+//
 //  if (e != SQLITE_OK) { 
 //    sqlite3_close(db);
-//    error = 1;
+//    error = e;
+//    return;
 //  }
-//}
+//
+//  const char* today = "YYYYMMDD";
+//
+//  char* sql = sqlite3_mprintf(
+//      "INSERT INTO Note ( NoteId, Text, DateCreated, DateChanged, SizeX, SizeY ) "\
+//      "VALUES( %d, \"%w\", \"%w\", \"%w\", %d, %d );", 
+//      note_id, text, today, today, size_x, size_y);
+//  std::cout << sql << std::endl;
+//
+//  e = sqlite3_exec(db, sql, NULL, NULL, NULL);
+//  if (e != SQLITE_OK) { 
+//    sqlite3_close(db);
+//    error = e;
+//    return;
+//  }
+//
+//  std::cout << "NOTE ID " << note_id << std::endl;
+//  sqlite3_free(sql);
+}
 
 // close the database then close the so
 void i_close() {
@@ -104,7 +110,7 @@ void i_close() {
 
   int e = sqlite3_close(db);
   if(e != SQLITE_OK) {
-    error = 1;
+    error = e;
   }
 }
 

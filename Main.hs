@@ -3,6 +3,7 @@
 import Foreign.Ptr
 import Foreign.C.String
 import Foreign.C.Types
+import Foreign.Marshal.Alloc ( free )
 
 import Control.Monad.RWS
 import Control.Monad.Except
@@ -67,29 +68,35 @@ getView = do (State ret) <- get
 
 main :: IO ()
 main = do args <- getArgs
-          maybeErr <- runExceptT (mainExcept args)
+          vty <- mkVty defaultConfig
+          maybeErr <- runExceptT (mainExcept vty args)
+          shutdown vty
           case maybeErr of
             Left s  -> putStrLn s
             Right _ -> return ()
 
-mainExcept [filename] = do
-  vty <- notesackSetup filename
+mainExcept vty [filename] = do
+  notesackSetup filename
   let initEnv = Env Database vty SackConfig
       initState = State (View 0 (0,0) 0)
   execRWST (sackInteract False) initEnv initState >> return ()  
-  notesackShutdown vty  
-mainExcept _ = throwError "Usage: notesack FILE"
+  notesackShutdown
+
+mainExcept _ _ = throwError "Usage: notesack FILE"
 
 sackInteract :: Bool -> Sack ()
 sackInteract shouldExit = do
   unless shouldExit $ handleNextEvent >>= sackInteract
 
 handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
-  where handleEvent e = return $ e == EvKey KEsc []
+  where handleEvent (EvKey (KChar 'a') []) = do
+          lift $ addNote "mytext DROP TABLES bobby..." "my tag" 3 3 
+          return False
+        handleEvent e = return $ e == EvKey KEsc []
 
 --------------------------------------------------------------------------------------
 
-notesackSetup :: String -> ExceptM (Vty)
+notesackSetup :: String -> ExceptM ()
 notesackSetup dbFile = do 
   isDir  <- liftIO $ doesDirectoryExist dbFile
   isFile <- liftIO $ doesFileExist dbFile
@@ -97,12 +104,9 @@ notesackSetup dbFile = do
     (True, _)  -> throwError $ "Input file \"" ++ dbFile ++ "\" is a directory"
     (_, True)  -> openDatabase dbFile
     (_, False) -> openDatabaseAndInit dbFile
-  liftIO $ mkVty defaultConfig
 
-notesackShutdown :: Vty -> ExceptM ()
-notesackShutdown vty = do
-  closeDatabase
-  liftIO $ shutdown vty
+notesackShutdown :: ExceptM ()
+notesackShutdown = closeDatabase
 
 --------------------------------------------------------------------------------------
 
@@ -113,21 +117,35 @@ openDatabaseAndInit str = libCall "could not open and initialize database" $
 openDatabase :: String -> ExceptM ()
 openDatabase str = libCall "could not open specified database" $ withCString str i_open
 
+addNote :: String -> String -> Int -> Int -> ExceptM ()
+addNote text tag szX szY = libCall "could not add note" $ withCString2 text tag addIt
+  where addIt text tag = i_add_note text tag (fromIntegral szX) (fromIntegral szY)
+        withCString2 :: String -> String -> (CString -> CString -> IO a) -> IO a
+        withCString2 x y f = do
+          xx <- newCString x
+          yy <- newCString y
+          ret <- f xx yy
+          free xx
+          free yy
+          return ret
+
 closeDatabase :: ExceptM ()
-closeDatabase = libCall "error in close of db and so file" i_close
+closeDatabase = libCall "error in close of db file" i_close
 
 libCall :: String -> IO a -> ExceptM a
 libCall errStr doIt = do
   ret     <- liftIO doIt
   errCode <- liftIO i_err
   if errCode /= 0
-     then throwError errStr
+     then throwError $ errStr ++ " (error code: "++show errCode++")"
      else return ret
   
 foreign import ccall "interface.h i_open"
   i_open :: CString -> IO ()
 foreign import ccall "interface.h i_open_and_init"
   i_open_and_init :: CString -> IO ()
+foreign import ccall "interface.h i_add_note"
+  i_add_note :: CString -> CString -> CInt -> CInt -> IO ()
 foreign import ccall "interface.h i_close"
   i_close :: IO ()
 foreign import ccall "interface.h i_err"

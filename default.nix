@@ -9,7 +9,7 @@ in pkgs.stdenv.mkDerivation {
      builder = ./builder.sh;
 
      main = ./Main.hs;
-     interfaceh = ./interface.h;
-     interfacec = ./interface.c;
+     interfaceHeader = ./interface.h;
+     interfaceSource = ./interface.cpp;
    }
 

@@ -6,8 +6,8 @@ mkdir src
 
 cd src
 cp $main       Main.hs
-cp $interfaceh interface.h
-cp $interfacec interface.c
+cp $interfaceHeader interface.h
+cp $interfaceSource interface.cpp
 
-ghc -o ../notesack -threaded -lsqlite3 -outputdir ../build Main.hs interface.c
+ghc -o ../notesack -threaded -lsqlite3 -lstdc++ -outputdir ../build Main.hs interface.cpp
 
