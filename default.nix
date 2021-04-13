@@ -1,15 +1,15 @@
-with (import ~/Projects/DcbPkgs {});
+let dcbPkgs = import ~/Projects/DcbPkgs {};
+    pkgs = dcbPkgs.dcbPkgs;
+    sqlite3 = dcbPkgs.sqlite;
+    ghc = pkgs.haskellPackages.ghcWithPackages (pkgs: with pkgs; [vty]); 
+    coreutils = pkgs.coreutils;
+in pkgs.stdenv.mkDerivation {
+     name = "notesack";
+     buildInputs = [ ghc sqlite3 coreutils ];
+     builder = ./builder.sh;
 
-derivation {
-  name = "notesack";
-  builder = "${dcbPkgs.bash}/bin/bash";
-  args = [ ./builder.sh ];
-  system = builtins.currentSystem;
-  ghc = dcbPkgs.haskellPackages.ghcWithPackages (pkgs: with pkgs; [vty]); 
-  coreutils = dcbPkgs.coreutils;
-  sqlite = sqlite;
+     main = ./Main.hs;
+     interfaceh = ./interface.h;
+     interfacec = ./interface.c;
+   }
 
-  main = ./Main.hs;
-  interfaceh = ./interface.h;
-  interfacec = ./interface.c;
-}

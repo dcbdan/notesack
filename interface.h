@@ -1,4 +1,3 @@
-#include "libFile.h"
 #include "sqlite3.h"
 
 // when these were named open / close / err, close would get
@@ -8,5 +7,6 @@
 // .. It didn't happen when the threaded option was removed
 
 void i_open(const char* filename);
+void i_open_and_init(const char* filename);
 void i_close();
 int  i_err();
