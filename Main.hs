@@ -52,7 +52,7 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 -- -- otherwise, add the view
 -- loadView :: String -> ExceptM ()
 -- loadView viewId = 
---   if isView viewId 
+--   if hasView viewId 
 --      then return ()
 --      else tvAdd (TableView viewId (0,0) Nothing)
 

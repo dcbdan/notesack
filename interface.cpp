@@ -5,31 +5,27 @@
 // REMOVE THESE
 #include <iostream>
 
-int error = 0;
 sqlite3* db;
 
-void i_open(const char* filename) {
-  error = 0;
-
-  int e = sqlite3_open(filename, &db);
-  if(e != SQLITE_OK) {
-    sqlite3_close(db);
-    error = e;
-    return;
+#define i_check(e)     \
+  if(e != SQLITE_OK) { \
+    sqlite3_close(db); \
+    return e;          \
   }
+
+int i_open(const char* filename) {
+  int e = sqlite3_open(filename, &db);
+  i_check(e);
 
   if(!db){
-    error = e;
-    return;
+    return e;
   }
+  return 0;
 }
 
-void i_open_and_init(const char* filename) {
-  i_open(filename);
-
-  if(error) {
-    return;
-  }
+int i_open_and_init(const char* filename) {
+  int e = i_open(filename);
+  i_check(e);
 
   const char* init = 
     "CREATE TABLE View (        \
@@ -52,25 +48,19 @@ void i_open_and_init(const char* filename) {
        DateCreated  Text,       \
        DateChanged  Text );"    ;
 
-  int e = sqlite3_exec(db, init, NULL, NULL, NULL);
-  if(e != SQLITE_OK) {
-    sqlite3_close(db);
-    error = 1;
-    return;
-  }
+  return sqlite3_exec(db, init, NULL, NULL, NULL);
 }
 
 // close the database then close the so
-void i_close() {
-  error = 0;
-
-  int e = sqlite3_close(db);
-  if(e != SQLITE_OK) {
-    error = e;
-  }
+int i_close() {
+  return sqlite3_close(db);
 }
 
-int i_err() {
-  return error;
+int add_view_no_selected(const char* view_id, int loc_x, int loc_y) {
+  return 1;
+}
+
+int add_view(const char* view_id, int loc_x, int loc_y, int selected) {
+  return 1;
 }
 
