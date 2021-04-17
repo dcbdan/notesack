@@ -1,6 +1,7 @@
 #include "sqlite3.h"
 #include <tuple>
 #include <functional>
+#include <memory>
 #include <type_traits>
 
 extern "C" {
@@ -10,11 +11,13 @@ extern "C" {
 //  ghc -o notesack -threaded -outputdir build Main.hs interface.c
 // even when main = return ()
 // .. It didn't happen when the threaded option was removed
-  int i_open(const char* filename);
-  int i_open_and_init(const char* filename);
-  int i_close();
-  int add_view_no_selected(const char* view_id, int loc_x, int loc_y);
-  int add_view(const char* view_id, int loc_x, int loc_y, int selected);
+  void i_open(const char* filename);
+  void i_init();
+  void i_close();
+  int i_error();
+  void add_view_no_selected(const char* view_id, int loc_x, int loc_y);
+  void add_view(const char* view_id, int loc_x, int loc_y, int selected);
+  bool has_view(const char* view_id);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -150,4 +153,15 @@ int exec(
 
   return sqlite3_finalize(stmt);
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+struct schar_delete_t {
+  void operator()(char* ptr){
+    sqlite3_free(ptr);
+  }
+};
+
+using schar_ptr_t = std::unique_ptr<char, schar_delete_t>;
+
 

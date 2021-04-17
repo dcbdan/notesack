@@ -29,7 +29,7 @@ main = do args <- getArgs
 mainExcept vty [filename] = do
   today <- liftIO getDate
   notesackSetup filename
-  --loadView today
+  loadView today
   let initEnv = Env vty SackConfig
       initState = State today
   execRWST (sackInteract False) initEnv initState >> return ()  
@@ -48,13 +48,15 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 
 --------------------------------------------------------------------------------------
 
--- -- If we have the view, let it be the view,
--- -- otherwise, add the view
--- loadView :: String -> ExceptM ()
--- loadView viewId = 
---   if hasView viewId 
---      then return ()
---      else tvAdd (TableView viewId (0,0) Nothing)
+unlessM bool v = do
+  maybeSo <- bool
+  unless maybeSo v
+
+-- If we have the view, let it be the view,
+-- otherwise, add the view
+loadView :: String -> ExceptM ()
+loadView viewId = 
+  unlessM (hasView viewId) (addView (TableView viewId (0,0) Nothing))
 
 notesackSetup :: String -> ExceptM ()
 notesackSetup dbFile = do 
