@@ -1,4 +1,4 @@
-module Misc ( getDate ) where
+module Notesack.Misc ( getDate ) where
 
 import Data.Time.Clock
 import Data.Time.Calendar

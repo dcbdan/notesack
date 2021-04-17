@@ -13,55 +13,9 @@ import Graphics.Vty
 import System.Environment(getArgs)
 import System.Directory
 
-import Misc 
-
-type ExceptM = ExceptT String IO
-type Sack = RWST Env () State ExceptM
-
-type Pos = Int
-type Id  = Int
-data Box = Box Pos Pos Pos Pos
-data Dir = DirL | DirR | DirU | DirD
-
--- things related to drawing boxes
--- inputs / hot keys / wtvr related to input stuff
-data SackConfig = SackConfig
-
-data Env = Env {
-  envVty        :: Vty,
-  envSackConfig :: SackConfig
-}
-
-data State = State { currentView :: String }
-
--- We define the tables
-
-data TableView = TableView {
-  tvViewId :: String,
-  tvLoc :: (Pos,Pos),
-  tvSelected :: Maybe Id 
-}
-
-data TableViewNote = TableViewNote {
-  tvnViewId :: String,
-  tvnNoteId :: Id,
-  tvnBox :: Box
-}
-data TableNote = TableNote {
-  nNoteId :: Id,
-  nText :: String,
-  nDateCreated :: String,
-  nDateChanged :: String
-}
-
-askVty :: Sack Vty
-askVty = envVty <$> ask
-
-askSackConfig :: Sack SackConfig
-askSackConfig = envSackConfig <$> ask
-
-getViewId :: Sack String
-getViewId = currentView <$> get
+import Notesack.Types
+import Notesack.Database
+import Notesack.Misc 
 
 main :: IO ()
 main = do args <- getArgs
@@ -75,6 +29,7 @@ main = do args <- getArgs
 mainExcept vty [filename] = do
   today <- liftIO getDate
   notesackSetup filename
+  --loadView today
   let initEnv = Env vty SackConfig
       initState = State today
   execRWST (sackInteract False) initEnv initState >> return ()  
@@ -93,6 +48,14 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 
 --------------------------------------------------------------------------------------
 
+-- -- If we have the view, let it be the view,
+-- -- otherwise, add the view
+-- loadView :: String -> ExceptM ()
+-- loadView viewId = 
+--   if isView viewId 
+--      then return ()
+--      else tvAdd (TableView viewId (0,0) Nothing)
+
 notesackSetup :: String -> ExceptM ()
 notesackSetup dbFile = do 
   isDir  <- liftIO $ doesDirectoryExist dbFile
@@ -104,33 +67,4 @@ notesackSetup dbFile = do
 
 notesackShutdown :: ExceptM ()
 notesackShutdown = closeDatabase
-
---------------------------------------------------------------------------------------
-
-openDatabaseAndInit :: String -> ExceptM ()
-openDatabaseAndInit str = libCall "could not open and initialize database" $ 
-  withCString str i_open_and_init
-
-openDatabase :: String -> ExceptM ()
-openDatabase str = libCall "could not open specified database" $ withCString str i_open
-
-closeDatabase :: ExceptM ()
-closeDatabase = libCall "error in close of db file" i_close
-
-libCall :: String -> IO a -> ExceptM a
-libCall errStr doIt = do
-  ret     <- liftIO doIt
-  errCode <- liftIO i_err
-  if errCode /= 0
-     then throwError $ errStr ++ " (error code: "++show errCode++")"
-     else return ret
-  
-foreign import ccall "interface.h i_open"
-  i_open :: CString -> IO ()
-foreign import ccall "interface.h i_open_and_init"
-  i_open_and_init :: CString -> IO ()
-foreign import ccall "interface.h i_close"
-  i_close :: IO ()
-foreign import ccall "interface.h i_err"
-  i_err :: IO CInt
 

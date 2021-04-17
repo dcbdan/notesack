@@ -11,6 +11,6 @@ in pkgs.stdenv.mkDerivation {
      main = ./Main.hs;
      interfaceHeader = ./interface.h;
      interfaceSource = ./interface.cpp;
-     misc = ./Misc.hs;
+     notesack = ./Notesack;
    }
 
