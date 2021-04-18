@@ -3,7 +3,8 @@
 
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
-  hasView, addView, addViewNote, addNote
+  hasView, addView, addViewNote, addNote,
+  areaHasNote
 ) where
 
 import Foreign.Ptr
@@ -47,6 +48,12 @@ openDatabase str = libCall "could not open specified database" $ withCString str
 closeDatabase :: ExceptM ()
 closeDatabase = libCall "error in close of db file" i_close
 
+areaHasNote :: String -> Box -> ExceptM Bool
+areaHasNote viewId (Box l r u d) =
+  let (ll,rr,uu,dd) = (f l, f r, f u, f d)
+      f = fromIntegral
+   in (== 1) <$> (libCall "areaHasNote" $ withCString viewId $ area_has_note ll rr uu dd)
+
 libCall :: String -> IO a -> ExceptM a
 libCall errStr doIt = do
   ret     <- liftIO doIt
@@ -69,3 +76,5 @@ foreign import ccall "interface.h add_view"
   add_view :: CString -> CInt -> CInt -> CInt -> IO ()
 foreign import ccall "interface.h has_view"
   has_view :: CString -> IO CBool
+foreign import ccall "interface.h area_has_note"
+  area_has_note :: CInt -> CInt -> CInt -> CInt -> CString -> IO CBool

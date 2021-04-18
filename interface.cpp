@@ -36,10 +36,10 @@ void i_init() {
      CREATE TABLE ViewNote (    \
        ViewId       Text,       \
        NoteId       Integer,    \
-       LocX         Integer,    \
-       LocY         Integer,    \
-       SizeX         Integer,   \
-       SizeY         Integer,   \
+       LocL         Integer,    \
+       LocR         Integer,    \
+       LocU         Integer,    \
+       LocD         Integer,    \
                                  PRIMARY KEY( ViewId, NoteId )\
      );                         \
      CREATE TABLE Note (        \
@@ -74,15 +74,30 @@ void add_view(const char* view_id, int loc_x, int loc_y, int note_id) {
   i_check_(sqlite3_exec(db, add_it_sql.get(), NULL, NULL, NULL));
 }
 
-bool has_view(const char* view_id) {
-  schar_ptr_t sql(sqlite3_mprintf(
-    "SELECT SUM(1) FROM View WHERE ViewId == \"%w\";", 
-    view_id));
+int count_it(schar_ptr_t& sql) {
   std::function<int(text_t,int&)> count_callback = 
     [](text_t, int& count_){ count_ += 1; return 0; };
   int count = 0;
   i_check(exec(db, sql.get(), count, count_callback),count);
   return count;
+}
+
+bool has_view(const char* view_id) {
+  schar_ptr_t sql(sqlite3_mprintf(
+    "SELECT SUM(1) FROM View WHERE ViewId == \"%w\";", 
+    view_id));
+  return count_it(sql);
+}
+
+bool area_has_note(int l, int r, int u, int d, const char* view_id) {
+  // max(LocL+1,l) <= min(LocR-1,r) and 
+  // max(LocU+1,u) <= min(LocD-1,d)
+  schar_ptr_t sql(sqlite3_mprintf(
+    "SELECT SUM(1) FROM View WHERE ViewId == \"%w\" "
+    "and max(LocL+1,%d) <= min(LocR-1,%d) "
+    "and max(LocU+1,%d) <= min(LocD-1,%d);",
+    view_id, l, r, u, d));
+  return count_it(sql);
 }
 
 

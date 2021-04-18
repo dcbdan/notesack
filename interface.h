@@ -18,6 +18,7 @@ extern "C" {
   void add_view_no_selected(const char* view_id, int loc_x, int loc_y);
   void add_view(const char* view_id, int loc_x, int loc_y, int selected);
   bool has_view(const char* view_id);
+  bool area_has_note(int,int,int,int,const char*);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

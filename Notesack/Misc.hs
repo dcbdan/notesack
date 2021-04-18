@@ -1,4 +1,4 @@
-module Notesack.Misc ( getDate ) where
+module Notesack.Misc ( getDate, (.>), (|>) ) where
 
 import Data.Time.Clock
 import Data.Time.Calendar
@@ -12,3 +12,5 @@ getDate = do
                            then '0':s
                            else s
 
+(.>) = flip (.)
+(|>) = flip ($)
