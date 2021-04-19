@@ -3,9 +3,9 @@
 #include <functional>
 #include <memory>
 #include <type_traits>
+#include <vector>
 
 extern "C" {
-
 // when these were named open / close / err, close would get
 // called when compiling with
 //  ghc -o notesack -threaded -outputdir build Main.hs interface.c
@@ -17,8 +17,12 @@ extern "C" {
   int i_error();
   void add_view_no_selected(const char* view_id, int loc_x, int loc_y);
   void add_view(const char* view_id, int loc_x, int loc_y, int selected);
+  void add_view_note(const char* view_id, int note_id, int l, int r, int u, int d);
+  void add_note(int note_id, const char* text, const char* create, const char* change);
   bool has_view(const char* view_id);
   bool area_has_note(int,int,int,int,const char*);
+  int max_note_id();
+
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -30,20 +34,26 @@ using text_t    = const unsigned char*;
 struct null_t {};
 // ^ if you don't actually want a column, use null_t
 
-template <typename T>
-using enable_integer_t = std::enable_if_t<std::is_same<T, integer_t>::value, T >;
+template <typename T, typename U, typename Out>
+using enable_if_same_out = std::enable_if_t<std::is_same<T, U>::value, Out >;
+
+template <typename T, typename U>
+using enable_if_same = enable_if_same_out<T,U,T>;
 
 template <typename T>
-using enable_float_t   = std::enable_if_t<std::is_same<T, float_t  >::value, T >;
+using enable_integer_t = enable_if_same<T, integer_t>;
 
 template <typename T>
-using enable_blob_t    = std::enable_if_t<std::is_same<T, blob_t   >::value, T >;
+using enable_float_t   = enable_if_same<T, float_t  >;
 
 template <typename T>
-using enable_text_t    = std::enable_if_t<std::is_same<T, text_t   >::value, T >;
+using enable_blob_t    = enable_if_same<T, blob_t   >;
 
 template <typename T>
-using enable_null_t    = std::enable_if_t<std::is_same<T, null_t   >::value, T >;
+using enable_text_t    = enable_if_same<T, text_t   >;
+
+template <typename T>
+using enable_null_t    = enable_if_same<T, null_t   >;
 
 template<typename T>
 struct is_tuple : std::false_type {};
@@ -51,11 +61,11 @@ struct is_tuple : std::false_type {};
 template<typename... Ts>
 struct is_tuple<std::tuple<Ts...>> : std::true_type {};
 
-template <typename T>
-using enable_tuple_t = std::enable_if_t<is_tuple<T>::value, T>;
+template <typename T, typename U=T>
+using enable_tuple_t = std::enable_if_t<is_tuple<T>::value, U>;
 
-template <typename T>
-using enable_not_tuple_t = std::enable_if_t<!is_tuple<T>::value, T>;
+template <typename T, typename U=T>
+using enable_not_tuple_t = std::enable_if_t<!is_tuple<T>::value, U>;
 
 template <class T, int N>
 enable_integer_t<T>
@@ -153,6 +163,19 @@ int exec(
   }
 
   return sqlite3_finalize(stmt);
+}
+
+template <typename U>
+int exec_to_vector(
+    sqlite3* db,
+    const char* sql,
+    std::vector<U>& ret)
+{
+  std::function<int(U,std::vector<U>&)> callback = [](U u, std::vector<U>& v) {
+    v.push_back(u);
+    return 0;
+  };
+  return exec(db, sql, ret, callback);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

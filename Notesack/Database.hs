@@ -3,8 +3,8 @@
 
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
-  hasView, addView, addViewNote, addNote,
-  areaHasNote
+  hasView, addTv, addTvn, addTn,
+  areaHasNote, maxNoteId, getNotesInArea
 ) where
 
 import Foreign.Ptr
@@ -21,20 +21,33 @@ import Notesack.Types
 hasView :: String -> ExceptM Bool
 hasView id = (==1) <$> (libCall "hasView" (withCString id has_view))
 
-addView :: TableView -> ExceptM ()
-addView (TableView id (locx,locy) Nothing) = 
+addTv :: TableView -> ExceptM ()
+addTv (TableView id (locx,locy) Nothing) = 
   libCall "could not add view" $ 
     withCString id $ \i -> add_view_no_selected i (fromIntegral locx) (fromIntegral locy)
-addView (TableView id (locx,locy) (Just selected)) = 
+addTv (TableView id (locx,locy) (Just selected)) = 
   libCall "could not add view" $ 
     withCString id $ \i -> add_view i (fromIntegral locx) (fromIntegral locy) (fromIntegral selected)
 
 
-addViewNote :: TableViewNote -> ExceptM ()
-addViewNote = undefined
+addTvn :: TableViewNote -> ExceptM ()
+addTvn (TableViewNote viewId noteId' (Box l' r' u' d')) =
+  let noteId = fromIntegral noteId'
+      [l,r,u,d] = map fromIntegral [l',r',u',d']
+   in libCall "could not add view, note pair" $
+        withCString viewId $ \id ->
+          add_view_note id noteId l r u d
 
-addNote :: TableNote -> ExceptM ()
-addNote = undefined
+withCStrings :: [String] -> ([CString] -> IO a) -> IO a
+withCStrings xs f = recurse (reverse xs) []
+  where recurse [] soFar = f soFar
+        recurse (x:xs) soFar = withCString x (\ newX -> recurse xs (newX:soFar))
+
+addTn :: TableNote -> ExceptM ()
+addTn (TableNote noteId' text' created' changed') =
+  libCall "could note add note" $
+    withCStrings [text', created', changed'] $ \[text, created, changed] ->
+      add_note (fromIntegral noteId') text created changed
 
 openDatabaseAndInit :: String -> ExceptM ()
 openDatabaseAndInit str = 
@@ -53,6 +66,14 @@ areaHasNote viewId (Box l r u d) =
   let (ll,rr,uu,dd) = (f l, f r, f u, f d)
       f = fromIntegral
    in (== 1) <$> (libCall "areaHasNote" $ withCString viewId $ area_has_note ll rr uu dd)
+
+maxNoteId :: ExceptM Id
+maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
+
+getNotesInArea :: String -> Box -> ExceptM [(Box, String)]
+getNotesInArea viewId (Box l' r' u' d') = return []
+
+
 
 libCall :: String -> IO a -> ExceptM a
 libCall errStr doIt = do
@@ -74,7 +95,13 @@ foreign import ccall "interface.h add_view_no_selected"
   add_view_no_selected :: CString -> CInt -> CInt -> IO ()
 foreign import ccall "interface.h add_view"
   add_view :: CString -> CInt -> CInt -> CInt -> IO ()
+foreign import ccall "interface.h add_view_note"
+  add_view_note :: CString -> CInt -> CInt -> CInt -> CInt -> CInt -> IO ()
+foreign import ccall "interface.h add_note"
+  add_note :: CInt -> CString -> CString -> CString -> IO ()
 foreign import ccall "interface.h has_view"
   has_view :: CString -> IO CBool
 foreign import ccall "interface.h area_has_note"
   area_has_note :: CInt -> CInt -> CInt -> CInt -> CString -> IO CBool
+foreign import ccall "interface.h max_note_id"
+  max_note_id :: IO CInt

@@ -74,30 +74,49 @@ void add_view(const char* view_id, int loc_x, int loc_y, int note_id) {
   i_check_(sqlite3_exec(db, add_it_sql.get(), NULL, NULL, NULL));
 }
 
-int count_it(schar_ptr_t& sql) {
-  std::function<int(text_t,int&)> count_callback = 
-    [](text_t, int& count_){ count_ += 1; return 0; };
+void add_view_note(const char* view_id, int note_id, int l, int r, int u, int d) {
+  schar_ptr_t add_it_sql(sqlite3_mprintf(
+    "INSERT INTO ViewNote ( ViewId, NoteId, LocL, LocR, LocU, LocD ) "\
+    "VALUES( \"%w\", %d, %d, %d, %d, %d );", view_id, note_id, l, r, u, d));
+  i_check_(sqlite3_exec(db, add_it_sql.get(), NULL, NULL, NULL));
+}
+
+void add_note(int note_id, const char* text, const char* create, const char* change) {
+  schar_ptr_t add_it_sql(sqlite3_mprintf(
+    "INSERT INTO Note ( NoteId, Text, DateCreated, DateChanged ) "\
+    "VALUES( %d, \"%w\", \"%w\", \"%w\" );", note_id, text, create, change));
+  i_check_(sqlite3_exec(db, add_it_sql.get(), NULL, NULL, NULL));
+}
+
+int count_it(const char* sql) {
+  std::function<int(integer_t,int&)> count_callback = 
+    [](integer_t v, int& count_){ count_ = v; return 0; };
   int count = 0;
-  i_check(exec(db, sql.get(), count, count_callback),count);
+  i_check(exec(db, sql, count, count_callback),count);
   return count;
 }
 
 bool has_view(const char* view_id) {
   schar_ptr_t sql(sqlite3_mprintf(
-    "SELECT SUM(1) FROM View WHERE ViewId == \"%w\";", 
+    "SELECT COUNT(*) FROM View WHERE ViewId == \"%w\";", 
     view_id));
-  return count_it(sql);
+  return count_it(sql.get()) > 0;
 }
 
+// check if bounding box of l/r/u/d intersects with 
+// any note portion (i.e. l/r/u/d can touch boundaries but not text)
+// in the view_Id
 bool area_has_note(int l, int r, int u, int d, const char* view_id) {
   // max(LocL+1,l) <= min(LocR-1,r) and 
   // max(LocU+1,u) <= min(LocD-1,d)
   schar_ptr_t sql(sqlite3_mprintf(
-    "SELECT SUM(1) FROM View WHERE ViewId == \"%w\" "
+    "SELECT COUNT(*) FROM ViewNote WHERE ViewId == \"%w\" "
     "and max(LocL+1,%d) <= min(LocR-1,%d) "
     "and max(LocU+1,%d) <= min(LocD-1,%d);",
     view_id, l, r, u, d));
-  return count_it(sql);
+  return count_it(sql.get()) > 0;
 }
 
-
+int max_note_id() {
+  return count_it("SELECT MAX(NoteId) FROM Note;");
+}

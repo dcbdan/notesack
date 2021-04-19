@@ -4,7 +4,7 @@ module Notesack.Types (
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..),Pos,Id,Box(..),
   askVty, askSackConfig, getView, getViewId, getMode, putMode,
-  getCursor, putCursor, moveCursor
+  getCursor, putCursor, moveCursor, moveLoc
 ) where
 
 import Control.Monad.RWS
@@ -33,7 +33,8 @@ data Env = Env {
 data State = State { 
   tableView :: TableView,
   mode :: Mode,
-  cursor :: (Pos,Pos)
+  cursor :: (Pos,Pos),
+  windowSize :: (Int,Int)
 }
 
 -- We define the tables
@@ -87,10 +88,12 @@ putCursor c = do
 
 moveCursor :: Dir -> Sack ()
 moveCursor direction = 
-  let move DirL (x,y) = (x-1,y)
-      move DirR (x,y) = (x+1,y)
-      move DirU (x,y) = (x,y-1)
-      move DirD (x,y) = (x,y+1)
-   in do state <- get
-         put state{ cursor = move direction (cursor state) }
+   do state <- get
+      put state{ cursor = moveLoc direction (cursor state) }
+
+moveLoc :: Dir -> (Pos,Pos) -> (Pos,Pos)
+moveLoc DirL (x,y) = (x-1,y)
+moveLoc DirR (x,y) = (x+1,y)
+moveLoc DirU (x,y) = (x,y-1)
+moveLoc DirD (x,y) = (x,y+1)
 
