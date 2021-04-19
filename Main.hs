@@ -12,7 +12,7 @@ import Graphics.Vty hiding ( Mode, setMode )
 import Graphics.Vty.Picture
 import Graphics.Vty.Image ( emptyImage, charFill )
 import Graphics.Vty.Attributes ( defAttr, withBackColor )
-import Graphics.Vty.Attributes.Color ( blue, green )
+import Graphics.Vty.Attributes.Color ( blue, green, rgbColor )
 
 import System.Environment(getArgs)
 import System.Directory
@@ -53,6 +53,7 @@ mainExcept _ _ = throwError "Usage: notesack FILE"
 
 sackInteract :: Bool -> Sack ()
 sackInteract shouldExit = do
+  drawSack
   unless shouldExit $ handleNextEvent >>= sackInteract
 
 -- TODO finish adding a note
@@ -144,10 +145,10 @@ drawSack = do
   let (modeImage, cursorObj) = 
         case maybeSelected of
                 Nothing -> (emptyImage, AbsoluteCursor x y)
-                Just (xx,yy) -> (selectImage (toBox (x,y) (xx,yy)), AbsoluteCursor x y)
+                Just (xx,yy) -> (imageBox blue (toBox (x,y) (xx,yy)), AbsoluteCursor x y)
   noteImages <- drawNotes
   let allImages = modeImage:noteImages
-      picture = (picForLayers allImages){ picCursor = cursorObj }
+      picture = (picForLayers allImages){ picCursor = cursorObj, picBackground = Background ' ' (withBackColor defAttr white) }
   liftIO $ update vty picture 
 
 drawNotes :: Sack [Image]
@@ -158,9 +159,7 @@ drawNotes = do
   notes <- lift $ getNotesInArea viewId (Box l (l+nx-1) u (u+ny-1))
   return $ map toImage notes
   where toImage :: (Box, String) -> Image
-        toImage (Box l r u d, text) =
-          let attr = withBackColor defAttr green
-           in charFill attr ' ' (r-l+1) (d-u+1) |> translate l u
+        toImage (box, text) = imageBox green box 
 
 addNoteToView :: Box -> Sack ()
 addNoteToView box = do
@@ -175,9 +174,10 @@ addNoteToView box = do
 newNoteId :: Sack Id
 newNoteId = (+1) <$> lift maxNoteId
 
-selectImage :: Box -> Image
-selectImage (Box l r u d) = charFill attr ' ' (r-l+1) (d-u+1) |> translate l u
-  where attr = withBackColor defAttr blue
+imageBox :: Color -> Box -> Image
+imageBox color (Box l r u d) = charFill attr ' ' (r-l+1) (d-u+1) |> translate l u
+  where attr = withBackColor defAttr color
+  
 
 toBox (x1,y1) (x2,y2) = Box (min x1 x2) (max x1 x2) (min y1 y2) (max y1 y2)
 

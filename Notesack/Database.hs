@@ -71,9 +71,35 @@ maxNoteId :: ExceptM Id
 maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 
 getNotesInArea :: String -> Box -> ExceptM [(Box, String)]
-getNotesInArea viewId (Box l' r' u' d') = return []
-
-
+getNotesInArea viewId (Box l r u d) = do
+  let [sl,sr,su,sd] = map show [l,r,u,d]
+      sql = unlines $ [
+        "SELECT Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
+        "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
+        "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
+        "  AND Note.NoteId == ViewNote.NoteId          ;"]
+      e = "getNotesInArea"
+  handle <- libCall e $ withCString sql $ stmt_init 
+  let incrementHandle = (==1) <$> (libCall e $ stmt_increment handle)
+      getInfo = do
+        text <- libCall e (stmt_column_text handle 0) >>= liftIO . peekCString
+        ll <- fromIntegral <$> (libCall e $ stmt_column_int handle 1)
+        rr <- fromIntegral <$> (libCall e $ stmt_column_int handle 2)
+        uu <- fromIntegral <$> (libCall e $ stmt_column_int handle 3)
+        dd <- fromIntegral <$> (libCall e $ stmt_column_int handle 4)
+        return (Box ll rr uu dd, text);
+  ret <- doUntil incrementHandle getInfo
+  libCall e $ stmt_finalize handle
+  return ret
+ 
+doUntil :: Monad m => m Bool -> m a -> m [a]
+doUntil checkIt doIt = 
+  do stopNow <- checkIt
+     if stopNow 
+        then return []
+        else do ret <- doIt
+                rest <- doUntil checkIt doIt
+                return (ret:rest)
 
 libCall :: String -> IO a -> ExceptM a
 libCall errStr doIt = do
@@ -105,3 +131,21 @@ foreign import ccall "interface.h area_has_note"
   area_has_note :: CInt -> CInt -> CInt -> CInt -> CString -> IO CBool
 foreign import ccall "interface.h max_note_id"
   max_note_id :: IO CInt
+----------------------------------------------------------------------------
+foreign import ccall "interface.h i_exec"
+  i_exec :: CString -> IO ()
+foreign import ccall "interface.h stmt_init"
+  stmt_init :: CString -> IO (Ptr ())
+foreign import ccall "interface.h stmt_finalize"
+  stmt_finalize :: Ptr () -> IO ()
+foreign import ccall "interface.h stmt_increment"
+  stmt_increment :: Ptr () -> IO CBool
+foreign import ccall "interface.h stmt_column_int"
+  stmt_column_int :: Ptr () -> CInt -> IO CInt
+foreign import ccall "interface.h stmt_column_double"
+  stmt_column_double :: Ptr () -> CInt -> IO CDouble
+foreign import ccall "interface.h stmt_column_blob"
+  stmt_column_blob :: Ptr () -> CInt -> IO (Ptr ())
+foreign import ccall "interface.h stmt_column_text"
+  stmt_column_text :: Ptr () -> CInt -> IO CString
+

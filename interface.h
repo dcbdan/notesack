@@ -5,16 +5,15 @@
 #include <type_traits>
 #include <vector>
 
+using integer_t = int;
+using float_t   = double;
+using blob_t    = const void*;
+using text_t    = const unsigned char*;
+struct null_t {};
+// ^ if you don't actually want a column, use null_t
+
 extern "C" {
-// when these were named open / close / err, close would get
-// called when compiling with
-//  ghc -o notesack -threaded -outputdir build Main.hs interface.c
-// even when main = return ()
-// .. It didn't happen when the threaded option was removed
-  void i_open(const char* filename);
   void i_init();
-  void i_close();
-  int i_error();
   void add_view_no_selected(const char* view_id, int loc_x, int loc_y);
   void add_view(const char* view_id, int loc_x, int loc_y, int selected);
   void add_view_note(const char* view_id, int note_id, int l, int r, int u, int d);
@@ -22,17 +21,28 @@ extern "C" {
   bool has_view(const char* view_id);
   bool area_has_note(int,int,int,int,const char*);
   int max_note_id();
-
+  ////////////////////////////////////////////
+  // when these were named open / close / err, close would get
+  // called when compiling with
+  //  ghc -o notesack -threaded -outputdir build Main.hs interface.c
+  // even when main = return ()
+  // .. It didn't happen when the threaded option was removed
+  // TODO: phase out the api functions above for just below
+  void i_open(const char* filename);
+  void i_close();
+  int i_error();
+  void i_exec(const char* sql);
+  sqlite3_stmt** stmt_init(const char* sql);
+  void stmt_finalize(sqlite3_stmt** stmt);
+  bool stmt_increment(sqlite3_stmt** stmt);
+  integer_t stmt_column_int   (sqlite3_stmt** ppStmt, int column);
+  float_t   stmt_column_double(sqlite3_stmt** ppStmt, int column);
+  blob_t    stmt_column_blob  (sqlite3_stmt** ppStmt, int column);
+  text_t    stmt_column_text  (sqlite3_stmt** ppStmt, int column);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-using integer_t = int;
-using float_t   = double;
-using blob_t    = const void*;
-using text_t    = const unsigned char*;
-struct null_t {};
-// ^ if you don't actually want a column, use null_t
 
 template <typename T, typename U, typename Out>
 using enable_if_same_out = std::enable_if_t<std::is_same<T, U>::value, Out >;

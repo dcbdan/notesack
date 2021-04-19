@@ -120,3 +120,49 @@ bool area_has_note(int l, int r, int u, int d, const char* view_id) {
 int max_note_id() {
   return count_it("SELECT MAX(NoteId) FROM Note;");
 }
+
+////////////////////////////////////////////////////////////////////////////////
+
+void i_exec(const char* sql) {
+  error = sqlite3_exec(db, sql, NULL, NULL, NULL);
+}
+
+sqlite3_stmt** stmt_init(const char* sql) {
+  sqlite3_stmt** ppStmt = new (sqlite3_stmt*);
+  error = sqlite3_prepare(db, sql, -1, ppStmt, NULL);
+  return ppStmt;
+}
+
+void stmt_finalize(sqlite3_stmt** ppStmt) {
+  error = sqlite3_finalize(*ppStmt);
+  delete ppStmt;
+}
+
+bool stmt_increment(sqlite3_stmt** ppStmt) {
+  int e = sqlite3_step(*ppStmt);
+  if(e == SQLITE_DONE) {
+    return true;
+  } 
+  if(e == SQLITE_ROW) {
+    return false;
+  }
+  error = e;
+  return true;
+}
+
+integer_t stmt_column_int(sqlite3_stmt** ppStmt, int column) {
+  return sqlite3_column_int(*ppStmt, column);
+}
+float_t stmt_column_double(sqlite3_stmt** ppStmt, int column) {
+  return sqlite3_column_double(*ppStmt, column);
+}
+blob_t stmt_column_blob(sqlite3_stmt** ppStmt, int column) {
+  return sqlite3_column_blob(*ppStmt, column);
+}
+text_t stmt_column_text(sqlite3_stmt** ppStmt, int column) {
+  return sqlite3_column_text(*ppStmt, column);
+}
+
+
+
+
