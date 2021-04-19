@@ -73,7 +73,7 @@ maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 
 -- TODO: is this SQL injection vulnerable? (yes)
 getNotesInArea :: String -> Box -> ExceptM [(Box, String)]
-getNotesInArea viewId (Box l r u d) = do
+getNotesInArea viewId (Box l r u d) = 
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sql = unlines $ [
         "SELECT Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
@@ -82,21 +82,13 @@ getNotesInArea viewId (Box l r u d) = do
         "  AND Note.NoteId == ViewNote.NoteId           ",
         "  AND ViewNote.ViewId == "++viewId++"         ;"]
       e = "getNotesInArea"
-  handle <- libCall e $ withCString sql $ stmt_init 
-  let incrementHandle = (==1) <$> (libCall e $ stmt_increment handle)
-      getInfo = do
-        text <- libCall e (stmt_column_text handle 0) >>= liftIO . peekCString
-        ll <- fromIntegral <$> (libCall e $ stmt_column_int handle 1)
-        rr <- fromIntegral <$> (libCall e $ stmt_column_int handle 2)
-        uu <- fromIntegral <$> (libCall e $ stmt_column_int handle 3)
-        dd <- fromIntegral <$> (libCall e $ stmt_column_int handle 4)
-        return (Box ll rr uu dd, text);
-  ret <- doUntil incrementHandle getInfo
-  libCall e $ stmt_finalize handle
-  return ret
+      fixRow (txt:positions) =
+        let [l,r,u,d] = map fromObjInt positions
+         in (Box l r u d, fromObjText txt)
+   in map fixRow <$> getTable e sql [SqlText, SqlInt, SqlInt, SqlInt, SqlInt]
 
 getNeighbors :: String -> Box -> ExceptM [Box]
-getNeighbors viewId (Box l r u d) = do
+getNeighbors viewId (Box l r u d) = 
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sql = unlines $ [
         "SELECT LocL, LocR, LocU, LocD FROM ViewNote",
@@ -106,18 +98,27 @@ getNeighbors viewId (Box l r u d) = do
         "  AND (LocL != "++sl++" OR LocR != "++sr++" OR ",
         "       LocU != "++su++" OR LocD != "++sd++");"]
       e = "getNeighbors"
-  handle <- libCall e $ withCString sql $ stmt_init 
-  let incrementHandle = (==1) <$> (libCall e $ stmt_increment handle)
-      getInfo = do
-        ll <- fromIntegral <$> (libCall e $ stmt_column_int handle 0)
-        rr <- fromIntegral <$> (libCall e $ stmt_column_int handle 1)
-        uu <- fromIntegral <$> (libCall e $ stmt_column_int handle 2)
-        dd <- fromIntegral <$> (libCall e $ stmt_column_int handle 3)
-        return (Box ll rr uu dd)
+      fixRow items = 
+        let [a,b,c,d] = map fromObjInt items
+         in Box a b c d
+   in map fixRow <$> getTable e sql [SqlInt, SqlInt, SqlInt, SqlInt]
+
+data SqlType = SqlInt | SqlText
+data SqlObj = ObjInt Int | ObjText String
+fromObjInt (ObjInt i) = i
+fromObjText (ObjText s) = s
+getTable :: String -> String -> [SqlType] -> ExceptM [[SqlObj]]
+getTable err sql columns = do
+  handle <- libCall err $ withCString sql stmt_init
+  let incrementHandle = (==1) <$> (libCall err $ stmt_increment handle)
+      getColumn (SqlInt, i) = (ObjInt . fromIntegral) <$> 
+        (libCall err $ stmt_column_int handle i)
+      getColumn (SqlText, i) = ObjText <$> 
+        (libCall err (stmt_column_text handle i) >>= liftIO . peekCString)
+      getInfo = mapM getColumn $ zip columns [0..]
   ret <- doUntil incrementHandle getInfo
-  libCall e $ stmt_finalize handle
+  libCall err $ stmt_finalize handle
   return ret
--- TODO: abstract the above two functions better so they're not almost copy paste
 
 doUntil :: Monad m => m Bool -> m a -> m [a]
 doUntil checkIt doIt = 
