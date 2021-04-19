@@ -11,6 +11,7 @@ import Control.Monad.Except
 import Graphics.Vty hiding ( Mode, setMode )
 import Graphics.Vty.Picture
 import Graphics.Vty.Image ( emptyImage, charFill )
+import qualified Graphics.Vty.Image as I
 import Graphics.Vty.Attributes ( defAttr, withBackColor )
 import Graphics.Vty.Attributes.Color ( blue, green, rgbColor )
 
@@ -20,6 +21,7 @@ import System.Directory
 import Notesack.Types
 import Notesack.Database
 import Notesack.Misc 
+import Notesack.Boundary
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -113,7 +115,7 @@ handleModeSelect (EvKey (KChar c) []) (Just (x,y)) | c `elem` "hjkl" =
       isExpanding cursor =
         let boxInit = toBox (x,y) cursor
             boxFini = toBox (x,y) (moveLoc dir cursor)
-            boxSize (Box l r u d) = (r-l)*(d-u)
+            boxSize (Box l r u d) = (r-l+1)*(d-u+1)
          in boxSize boxFini > boxSize boxInit
   in do (xx,yy) <- getCursor
         let region = selectRegion (xx,yy)
@@ -146,9 +148,9 @@ drawSack = do
         case maybeSelected of
                 Nothing -> (emptyImage, AbsoluteCursor x y)
                 Just (xx,yy) -> (imageBox blue (toBox (x,y) (xx,yy)), AbsoluteCursor x y)
-  noteImages <- drawNotes
+  noteImages <- drawNotesWithBoundary
   let allImages = modeImage:noteImages
-      picture = (picForLayers allImages){ picCursor = cursorObj, picBackground = Background ' ' (withBackColor defAttr white) }
+      picture = (picForLayers allImages){ picCursor = cursorObj, picBackground = Background ' ' defAttr }
   liftIO $ update vty picture 
 
 drawNotes :: Sack [Image]
@@ -160,6 +162,30 @@ drawNotes = do
   return $ map toImage notes
   where toImage :: (Box, String) -> Image
         toImage (box, text) = imageBox green box 
+
+-- 1) get all the notes that need to be drawn
+-- 2) for each note, get the boxes of the neighbors
+-- 3) draw the boundary elements
+drawNotesWithBoundary :: Sack [Image]
+drawNotesWithBoundary = do
+  (l,u) <- tvLoc <$> getView 
+  (nx,ny) <- windowSize <$> get
+  viewId <- getViewId
+  notes <- lift $ getNotesInArea viewId (Box l (l+nx-1) u (u+ny-1))
+  let toImage :: (Box, String) -> Sack Image
+      toImage (box@(Box il ir iu id), text) = do
+        neighbors <- lift $ getNeighbors viewId box
+        let (top, sides, bot) = boundary box neighbors
+            (lSide, rSide) = unzip sides
+            lImg = I.vertCat $ map (I.char defAttr) lSide
+            rImg = I.vertCat $ map (I.char defAttr) rSide
+            tImg = I.string defAttr top
+            bImg = I.string defAttr bot
+            numN = length neighbors
+            textImg = charFill defAttr (head $ show numN) (ir-il-1) (id-iu-1)
+            img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
+        return img
+  mapM toImage notes
 
 addNoteToView :: Box -> Sack ()
 addNoteToView box = do

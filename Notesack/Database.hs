@@ -4,7 +4,8 @@
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
   hasView, addTv, addTvn, addTn,
-  areaHasNote, maxNoteId, getNotesInArea
+  areaHasNote, maxNoteId, getNotesInArea,
+  getNeighbors
 ) where
 
 import Foreign.Ptr
@@ -70,6 +71,7 @@ areaHasNote viewId (Box l r u d) =
 maxNoteId :: ExceptM Id
 maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 
+-- TODO: is this SQL injection vulnerable? (yes)
 getNotesInArea :: String -> Box -> ExceptM [(Box, String)]
 getNotesInArea viewId (Box l r u d) = do
   let [sl,sr,su,sd] = map show [l,r,u,d]
@@ -77,7 +79,8 @@ getNotesInArea viewId (Box l r u d) = do
         "SELECT Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
         "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
-        "  AND Note.NoteId == ViewNote.NoteId          ;"]
+        "  AND Note.NoteId == ViewNote.NoteId           ",
+        "  AND ViewNote.ViewId == "++viewId++"         ;"]
       e = "getNotesInArea"
   handle <- libCall e $ withCString sql $ stmt_init 
   let incrementHandle = (==1) <$> (libCall e $ stmt_increment handle)
@@ -91,7 +94,31 @@ getNotesInArea viewId (Box l r u d) = do
   ret <- doUntil incrementHandle getInfo
   libCall e $ stmt_finalize handle
   return ret
- 
+
+getNeighbors :: String -> Box -> ExceptM [Box]
+getNeighbors viewId (Box l r u d) = do
+  let [sl,sr,su,sd] = map show [l,r,u,d]
+      sql = unlines $ [
+        "SELECT LocL, LocR, LocU, LocD FROM ViewNote",
+        "WHERE ViewNote.ViewId == "++viewId,
+        "  AND MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
+        "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
+        "  AND (LocL != "++sl++" OR LocR != "++sr++" OR ",
+        "       LocU != "++su++" OR LocD != "++sd++");"]
+      e = "getNeighbors"
+  handle <- libCall e $ withCString sql $ stmt_init 
+  let incrementHandle = (==1) <$> (libCall e $ stmt_increment handle)
+      getInfo = do
+        ll <- fromIntegral <$> (libCall e $ stmt_column_int handle 0)
+        rr <- fromIntegral <$> (libCall e $ stmt_column_int handle 1)
+        uu <- fromIntegral <$> (libCall e $ stmt_column_int handle 2)
+        dd <- fromIntegral <$> (libCall e $ stmt_column_int handle 3)
+        return (Box ll rr uu dd)
+  ret <- doUntil incrementHandle getInfo
+  libCall e $ stmt_finalize handle
+  return ret
+-- TODO: abstract the above two functions better so they're not almost copy paste
+
 doUntil :: Monad m => m Bool -> m a -> m [a]
 doUntil checkIt doIt = 
   do stopNow <- checkIt

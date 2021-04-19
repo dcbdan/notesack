@@ -16,9 +16,15 @@ type ExceptM = ExceptT String IO
 type Sack = RWST Env () State ExceptM
 
 type Pos = Int
+
 type Id  = Int
+
 data Mode = ModeSelect (Maybe (Pos,Pos))
+
+-- The region covered by Box l r u d
+-- is [l,r] x [u,d]
 data Box = Box Pos Pos Pos Pos
+
 data Dir = DirL | DirR | DirU | DirD
 
 -- things related to drawing boxes
