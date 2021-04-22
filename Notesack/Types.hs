@@ -1,6 +1,6 @@
 module Notesack.Types (
   ExceptM, Sack,
-  SackConfig(..), Env(..), State(..), Mode(..),
+  SackConfig(..), Env(..), State(..), Mode(..), SelectAction(..),
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..),Pos,Id,Box(..),
   askVty, askSackConfig, getView, getViewId, getMode, putMode,
@@ -19,7 +19,29 @@ type Pos = Int
 
 type Id  = Int
 
-data Mode = ModeSelect (Maybe (Pos,Pos))
+-- What are all the modes?
+--   BaseMode           - move the cursor around, enter other modes
+--                      - : to go to status mode
+--                      - Enter to enter EditMode
+--                      - Space to enter select mode
+--   SelectMode         - select a region to do something
+--                      - press escape to go to base mode
+--                      - press space to do selection
+--   StatusMode         - write stuff in the status bar
+--                      - press escape twice to go to base
+--   EditMode           - a box is selected, hjkl to navigate cursor on box
+--                      - i to enter insert mode
+--                      - : to go to status mode
+--   InserMode          - Escape to enter edit mode
+--                      - typing modifies text contents of the box
+data Mode = 
+    BaseMode 
+  | SelectMode (Pos,Pos) SelectAction
+  | StatusMode
+  | EditMode
+  | InsertMode
+
+data SelectAction = SNewNote
 
 -- The region covered by Box l r u d
 -- is [l,r] x [u,d]

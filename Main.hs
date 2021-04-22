@@ -50,7 +50,7 @@ mainExcept vty [filename] = do
         picBackground = Background ' ' defAttr }
       initState = State 
         (TableView today (0,0) Nothing) 
-        (ModeSelect Nothing) 
+        BaseMode
         (0,0) 
         initWindowSize
         initNotesInView
@@ -88,43 +88,51 @@ sackInteract shouldExit =
     sackInteract exitNext
 
 handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
-  where handleEvent (EvKey KEsc []) = return True
-        handleEvent (EvResize nx ny) = do
-          state <- get
-          put state{ windowSize = (nx,ny) }
-          return False
-        handleEvent event = do
-          mode <- getMode
-          case mode of
-            ModeSelect selectRegion -> handleModeSelect event selectRegion
-          return False
+  where handleEvent event = getMode >>= (flip handleEventMode event)
 
-handleModeSelect :: Event -> Maybe (Pos,Pos) -> Sack ()
+handleEventMode :: Mode -> Event -> Sack Bool
 
--- On space, select or deselect.
--- If selecting, make sure that the cursor is not on a note
-handleModeSelect (EvKey (KChar ' ') []) Nothing = do
+-- For now but this really shouldn't do anything TODO
+handleEventMode BaseMode (EvKey KEsc []) = return True
+
+-- Just move the cursor
+handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "hjkl" = 
+  putMoveCursor (dirFromChar c) >> return False
+
+-- Enter status mode
+handleEventMode BaseMode (EvKey (KChar ':') []) = error "not implemented"
+
+-- Try to enter edit mode
+handleEventMode BaseMode (EvKey KEnter []) = error "not implemented"
+
+-- enter select mode
+handleEventMode BaseMode (EvKey (KChar ' ') []) = do
   cursor@(l,u) <- getCursor
   viewId <- getViewId
   canSelect <- not <$> lift (areaHasNote viewId (Box l l u u))
   if canSelect 
-    then putMode (ModeSelect (Just cursor))
+    then putMode (SelectMode cursor SNewNote)
     else return ()
+  return False
 
--- On deselect, if a box is big enough, 
--- save it
--- A box is "big enough" if it is atleast 3 wide and 3 tall.
-handleModeSelect (EvKey (KChar ' ') []) (Just (xx,yy)) = do
+-- just leave select mode by escape
+handleEventMode (SelectMode _ _) (EvKey KEsc []) = putMode BaseMode >> return False
+
+--  if we're deselecting, make sure the box is big enough. if so,
+--  do the action on it
+handleEventMode (SelectMode (xx,yy) action) (EvKey (KChar ' ') []) = do
   (x,y) <- getCursor
   let box@(Box l r u d) = toBox (x,y) (xx,yy)
   if r-l < 2 || d-u < 2
      then return ()
-     else addNoteToView box
-  putMode (ModeSelect Nothing)
+     else addNoteToView action box
+  putMode BaseMode
+  return False
 
--- If we're selecting, make sure that expanding in the direction is 
--- not going to bump into another box.
-handleModeSelect (EvKey (KChar c) []) (Just (x,y)) | c `elem` "hjkl" = 
+-- movement in select mode;
+-- make sure that expanding in the direction is not going to bump into
+-- another box
+handleEventMode (SelectMode (x,y) action) (EvKey (KChar c) []) | c `elem` "hjkl" = 
   let dir = dirFromChar c
       selectRegion (xx,yy) =
         let (Box l r u d) = toBox (x,y) (xx,yy)
@@ -147,13 +155,9 @@ handleModeSelect (EvKey (KChar c) []) (Just (x,y)) | c `elem` "hjkl" =
         if canMove
            then putMoveCursor dir
            else return ()
-        
--- Not selecting anything, so just move the cursor
-handleModeSelect (EvKey (KChar c) []) Nothing | c `elem` "hjkl" = 
-  let dir = dirFromChar c
-   in putMoveCursor dir
+        return False
 
-handleModeSelect _ _ = return ()
+handleEventMode _ _ = return False
 
 dirFromChar 'h' = DirL
 dirFromChar 'j' = DirD
@@ -164,11 +168,12 @@ drawSack :: Sack ()
 drawSack = do
   vty <- askVty
   (x,y) <- getCursor
-  ModeSelect maybeSelected <- getMode
-  let (modeImage, cursorObj) = 
-        case maybeSelected of
-                Nothing -> (emptyImage, AbsoluteCursor x y)
-                Just (xx,yy) -> (imageBox blue (toBox (x,y) (xx,yy)), AbsoluteCursor x y)
+  mode <- getMode
+  let cursorObj = AbsoluteCursor x y
+      modeImage = 
+        case mode of
+          (SelectMode (xx,yy) _) -> imageBox blue (toBox (x,y) (xx,yy))
+          _                      -> emptyImage
   noteImages <- (map snd . notesInView) <$> get
   
   let allImages = modeImage:noteImages
@@ -178,8 +183,8 @@ drawSack = do
   liftIO $ update vty picture 
 
 -- this funciton is assuming box is in view
-addNoteToView :: Box -> Sack ()
-addNoteToView box = do
+addNoteToView :: SelectAction -> Box -> Sack ()
+addNoteToView _ box = do
   today <- liftIO getDate
   viewId <- getViewId
   noteId <- newNoteId
