@@ -32,13 +32,14 @@ type Id  = Int
 --   EditMode           - a box is selected, hjkl to navigate cursor on box
 --                      - i to enter insert mode
 --                      - : to go to status mode
+--                      - Esc to go to base mode
 --   InserMode          - Escape to enter edit mode
 --                      - typing modifies text contents of the box
 data Mode = 
     BaseMode 
   | SelectMode (Pos,Pos) SelectAction
   | StatusMode
-  | EditMode
+  | EditMode Id Box String
   | InsertMode
 
 data SelectAction = SNewNote

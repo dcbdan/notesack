@@ -103,7 +103,35 @@ handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "hjkl" =
 handleEventMode BaseMode (EvKey (KChar ':') []) = error "not implemented"
 
 -- Try to enter edit mode
-handleEventMode BaseMode (EvKey KEnter []) = error "not implemented"
+handleEventMode BaseMode (EvKey KEnter []) = do
+  viewId <- getViewId
+  (l,u) <- getCursor
+  notesInfo <- lift $ getNotesInArea viewId (Box l l u u)
+  case notesInfo of
+    -- there is no note here
+    [] -> return ()
+    -- trying to enter a note on a boundary
+    (_:_:_) -> return ()
+    -- one note
+    [(noteId, box, text)] -> 
+      do -- 1) remove the note from the cache
+         -- 2) update the mode
+         state <- get
+         put state{ 
+          notesInView = filter (fst .> (/= noteId)) (notesInView state),
+          mode = EditMode noteId box text }
+  return False 
+
+-- exit edit mode
+handleEventMode (EditMode noteId box text) (EvKey KEsc []) = do
+  -- (1) put the note back into the cache
+  -- (2) save it (TODO)
+  viewId <- getViewId
+  img <- lift $ toImage viewId box text
+  state <- get
+  put state{ notesInView = (noteId, img):(notesInView state),
+             mode = BaseMode }
+  return False
 
 -- enter select mode
 handleEventMode BaseMode (EvKey (KChar ' ') []) = do
@@ -125,7 +153,7 @@ handleEventMode (SelectMode (xx,yy) action) (EvKey (KChar ' ') []) = do
   let box@(Box l r u d) = toBox (x,y) (xx,yy)
   if r-l < 2 || d-u < 2
      then return ()
-     else addNoteToView action box
+     else addNoteToView action box ""
   putMode BaseMode
   return False
 
@@ -170,10 +198,12 @@ drawSack = do
   (x,y) <- getCursor
   mode <- getMode
   let cursorObj = AbsoluteCursor x y
-      modeImage = 
-        case mode of
-          (SelectMode (xx,yy) _) -> imageBox blue (toBox (x,y) (xx,yy))
-          _                      -> emptyImage
+  modeImage <-
+    case mode of
+      (SelectMode (xx,yy) _) -> return $ imageBox blue (toBox (x,y) (xx,yy))
+      (EditMode _ box text)  -> do viewId <- getViewId
+                                   lift $ toImage viewId box text
+      _                      -> return emptyImage
   noteImages <- (map snd . notesInView) <$> get
   
   let allImages = modeImage:noteImages
@@ -183,8 +213,8 @@ drawSack = do
   liftIO $ update vty picture 
 
 -- this funciton is assuming box is in view
-addNoteToView :: SelectAction -> Box -> Sack ()
-addNoteToView _ box = do
+addNoteToView :: SelectAction -> Box -> String -> Sack ()
+addNoteToView _ box text = do
   today <- liftIO getDate
   viewId <- getViewId
   noteId <- newNoteId
@@ -194,7 +224,7 @@ addNoteToView _ box = do
   lift $ addTn  tn
   
   state <- get
-  img <- lift $ toImage viewId box ""
+  img <- lift $ toImage viewId box text
   put state { notesInView = (noteId, img):(notesInView state) }
 
 newNoteId :: Sack Id
