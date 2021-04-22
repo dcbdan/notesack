@@ -105,14 +105,16 @@ handleEventMode BaseMode (EvKey (KChar ':') []) = error "not implemented"
 -- Try to enter edit mode
 handleEventMode BaseMode (EvKey KEnter []) = do
   viewId <- getViewId
-  (l,u) <- getCursor
+  cursor@(l,u) <- getCursor
   notesInfo <- lift $ getNotesInArea viewId (Box l l u u)
   case notesInfo of
     -- there is no note here
     [] -> return ()
     -- trying to enter a note on a boundary
     (_:_:_) -> return ()
-    -- one note
+    -- one note, but cursor on boundary
+    [(_, box, _)] | onBoundary box cursor -> return ()
+    -- one note, cursor in correct region
     [(noteId, box, text)] -> 
       do -- 1) remove the note from the cache
          -- 2) update the mode
@@ -121,6 +123,15 @@ handleEventMode BaseMode (EvKey KEnter []) = do
           notesInView = filter (fst .> (/= noteId)) (notesInView state),
           mode = EditMode noteId box text }
   return False 
+
+-- move the cursor but only within the boundaries of the box
+handleEventMode 
+  (EditMode _ box _) 
+  (EvKey (KChar c) []) | c `elem` "hjkl" =
+    do aNewCursor <- moveLoc (dirFromChar c) <$> getCursor
+       if onBoundary box aNewCursor
+          then return False
+          else putCursor aNewCursor >> return False
 
 -- exit edit mode
 handleEventMode (EditMode noteId box text) (EvKey KEsc []) = do
@@ -260,5 +271,6 @@ notesackSetup dbFile = do
 notesackShutdown :: ExceptM ()
 notesackShutdown = closeDatabase
 
-
+onBoundary :: Box -> (Pos, Pos) -> Bool
+onBoundary (Box ll rr uu dd) (l, u) = ll == l || rr == l || uu == u || dd == u
 
