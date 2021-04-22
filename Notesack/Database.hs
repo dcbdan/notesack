@@ -72,20 +72,20 @@ maxNoteId :: ExceptM Id
 maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 
 -- TODO: is this SQL injection vulnerable? (yes)
-getNotesInArea :: String -> Box -> ExceptM [(Box, String)]
+getNotesInArea :: String -> Box -> ExceptM [(Id, Box, String)]
 getNotesInArea viewId (Box l r u d) = 
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sql = unlines $ [
-        "SELECT Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
+        "SELECT Note.NoteId, Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
         "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
         "  AND Note.NoteId == ViewNote.NoteId           ",
         "  AND ViewNote.ViewId == "++viewId++"         ;"]
       e = "getNotesInArea"
-      fixRow (txt:positions) =
+      fixRow (which:txt:positions) =
         let [l,r,u,d] = map fromObjInt positions
-         in (Box l r u d, fromObjText txt)
-   in map fixRow <$> getTable e sql [SqlText, SqlInt, SqlInt, SqlInt, SqlInt]
+         in (fromObjInt which,Box l r u d, fromObjText txt)
+   in map fixRow <$> getTable e sql [SqlInt, SqlText, SqlInt, SqlInt, SqlInt, SqlInt]
 
 getNeighbors :: String -> Box -> ExceptM [Box]
 getNeighbors viewId (Box l r u d) = 

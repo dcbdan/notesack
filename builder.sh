@@ -11,5 +11,8 @@ cp $interfaceSource interface.cpp
 mkdir Notesack
 cp $notesack/* Notesack
 
-ghc -o ../notesack -threaded -lsqlite3 -lstdc++ -outputdir ../build Main.hs interface.cpp
-
+if [ "$profile" = 1 ] ; then
+  ghc -prof -fprof-auto -o ../notesack -threaded -lsqlite3 -lstdc++ -outputdir ../build Main.hs interface.cpp
+else 
+  ghc -o ../notesack -threaded -lsqlite3 -lstdc++ -outputdir ../build Main.hs interface.cpp
+fi

@@ -38,32 +38,54 @@ main = do args <- getArgs
             Right _ -> return ()
 
 mainExcept vty [filename] = do
-  today <- liftIO getDate
-  initWindowSize <- liftIO getWindowSize
   notesackSetup filename
+  today <- liftIO getDate
   loadView today
+  initWindowSize <- liftIO getWindowSize
+  initNotesInView <- getInitNotes today (0,0) initWindowSize
   let initEnv = Env vty SackConfig
+      initPicture = Picture {
+        picCursor = AbsoluteCursor 0 0,
+        picLayers = map snd initNotesInView, 
+        picBackground = Background ' ' defAttr }
       initState = State 
         (TableView today (0,0) Nothing) 
         (ModeSelect Nothing) 
         (0,0) 
         initWindowSize
-  execRWST (sackInteract False) initEnv initState >> return ()  
+        initNotesInView
+  execRWST (drawSack >> sackInteract False) initEnv initState >> return ()  
   notesackShutdown
-
 mainExcept _ _ = throwError "Usage: notesack FILE"
 
-sackInteract :: Bool -> Sack ()
-sackInteract shouldExit = do
-  drawSack
-  unless shouldExit $ handleNextEvent >>= sackInteract
+getInitNotes viewId (x,y) (nx, ny) = do
+  notesInfo <- getNotesInArea viewId (Box x (x+nx-1) y (y+ny-1))
+  let fix (noteId, box, text) = do
+        img <- toImage viewId box text
+        return (noteId, img)
+  mapM fix notesInfo
 
--- TODO finish adding a note
---
--- Things
--- 1) Draw all the notes in the view
--- 2) save on deselect (if size of box is big enough)
--- 3) only select if not on a note
+toImage :: String -> Box -> String -> ExceptM Image
+toImage viewId box@(Box il ir iu id) text = do
+        neighbors <- getNeighbors viewId box
+        let (top, sides, bot) = boundary box neighbors
+            (lSide, rSide) = unzip sides
+            lImg = I.vertCat $ map (I.char defAttr) lSide
+            rImg = I.vertCat $ map (I.char defAttr) rSide
+            tImg = I.string defAttr top
+            bImg = I.string defAttr bot
+            numN = length neighbors
+            textImg = charFill defAttr (head $ show numN) (ir-il-1) (id-iu-1)
+            img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
+        return img 
+
+
+sackInteract :: Bool -> Sack ()
+sackInteract shouldExit =
+  unless shouldExit $ do
+    exitNext <- handleNextEvent
+    drawSack
+    sackInteract exitNext
 
 handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
   where handleEvent (EvKey KEsc []) = return True
@@ -75,7 +97,6 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
           mode <- getMode
           case mode of
             ModeSelect selectRegion -> handleModeSelect event selectRegion
-          drawSack
           return False
 
 handleModeSelect :: Event -> Maybe (Pos,Pos) -> Sack ()
@@ -124,13 +145,13 @@ handleModeSelect (EvKey (KChar c) []) (Just (x,y)) | c `elem` "hjkl" =
                       then not <$> lift (areaHasNote viewId region)
                       else return True
         if canMove
-           then moveCursor dir
+           then putMoveCursor dir
            else return ()
         
 -- Not selecting anything, so just move the cursor
 handleModeSelect (EvKey (KChar c) []) Nothing | c `elem` "hjkl" = 
   let dir = dirFromChar c
-   in moveCursor dir
+   in putMoveCursor dir
 
 handleModeSelect _ _ = return ()
 
@@ -148,45 +169,15 @@ drawSack = do
         case maybeSelected of
                 Nothing -> (emptyImage, AbsoluteCursor x y)
                 Just (xx,yy) -> (imageBox blue (toBox (x,y) (xx,yy)), AbsoluteCursor x y)
-  noteImages <- drawNotesWithBoundary
+  noteImages <- (map snd . notesInView) <$> get
+  
   let allImages = modeImage:noteImages
-      picture = (picForLayers allImages){ picCursor = cursorObj, picBackground = Background ' ' defAttr }
+      picture = (picForLayers allImages){ 
+        picCursor = cursorObj, 
+        picBackground = Background ' ' defAttr }
   liftIO $ update vty picture 
 
-drawNotes :: Sack [Image]
-drawNotes = do
-  (l,u) <- tvLoc <$> getView 
-  (nx,ny) <- windowSize <$> get
-  viewId <- getViewId
-  notes <- lift $ getNotesInArea viewId (Box l (l+nx-1) u (u+ny-1))
-  return $ map toImage notes
-  where toImage :: (Box, String) -> Image
-        toImage (box, text) = imageBox green box 
-
--- 1) get all the notes that need to be drawn
--- 2) for each note, get the boxes of the neighbors
--- 3) draw the boundary elements
-drawNotesWithBoundary :: Sack [Image]
-drawNotesWithBoundary = do
-  (l,u) <- tvLoc <$> getView 
-  (nx,ny) <- windowSize <$> get
-  viewId <- getViewId
-  notes <- lift $ getNotesInArea viewId (Box l (l+nx-1) u (u+ny-1))
-  let toImage :: (Box, String) -> Sack Image
-      toImage (box@(Box il ir iu id), text) = do
-        neighbors <- lift $ getNeighbors viewId box
-        let (top, sides, bot) = boundary box neighbors
-            (lSide, rSide) = unzip sides
-            lImg = I.vertCat $ map (I.char defAttr) lSide
-            rImg = I.vertCat $ map (I.char defAttr) rSide
-            tImg = I.string defAttr top
-            bImg = I.string defAttr bot
-            numN = length neighbors
-            textImg = charFill defAttr (head $ show numN) (ir-il-1) (id-iu-1)
-            img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
-        return img
-  mapM toImage notes
-
+-- this funciton is assuming box is in view
 addNoteToView :: Box -> Sack ()
 addNoteToView box = do
   today <- liftIO getDate
@@ -196,6 +187,10 @@ addNoteToView box = do
       tn  = TableNote noteId "" today today
   lift $ addTvn tvn
   lift $ addTn  tn
+  
+  state <- get
+  img <- lift $ toImage viewId box ""
+  put state { notesInView = (noteId, img):(notesInView state) }
 
 newNoteId :: Sack Id
 newNoteId = (+1) <$> lift maxNoteId
@@ -204,13 +199,8 @@ imageBox :: Color -> Box -> Image
 imageBox color (Box l r u d) = charFill attr ' ' (r-l+1) (d-u+1) |> translate l u
   where attr = withBackColor defAttr color
   
-
 toBox (x1,y1) (x2,y2) = Box (min x1 x2) (max x1 x2) (min y1 y2) (max y1 y2)
 
---  where handleEvent (EvKey (KChar 'a') []) = do
---          return False
---        handleEvent e = return $ e == EvKey KEsc []
---
 --------------------------------------------------------------------------------------
 
 unlessM bool v = do

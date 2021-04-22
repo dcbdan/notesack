@@ -1,3 +1,4 @@
+{ profile ? false }:
 let dcbPkgs = import ~/Projects/DcbPkgs {};
     pkgs = dcbPkgs.dcbPkgs;
     sqlite3 = dcbPkgs.sqlite;
@@ -7,6 +8,7 @@ in pkgs.stdenv.mkDerivation {
      name = "notesack";
      buildInputs = [ ghc sqlite3 coreutils ];
      builder = ./builder.sh;
+     profile = profile;
 
      main = ./Main.hs;
      interfaceHeader = ./interface.h;
