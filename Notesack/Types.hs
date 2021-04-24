@@ -1,6 +1,6 @@
 module Notesack.Types (
   ExceptM, Sack,
-  SackConfig(..), Env(..), State(..), Mode(..), SelectAction(..),
+  SackConfig(..), Env(..), State(..), Mode(..), SelectAction(..), EditState(..),
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..),Pos,Id,Box(..),
   askVty, askSackConfig, getView, getViewId, getMode, putMode,
@@ -11,6 +11,7 @@ import Control.Monad.RWS
 import Control.Monad.Except
 
 import Graphics.Vty hiding ( Mode, setMode )
+import Notesack.EditStr ( EditStr )
 
 type ExceptM = ExceptT String IO
 type Sack = RWST Env () State ExceptM
@@ -30,19 +31,22 @@ type Id  = Int
 --   StatusMode         - write stuff in the status bar
 --                      - press escape twice to go to base
 --   EditMode           - a box is selected, hjkl to navigate cursor on box
---                      - i to enter insert mode
+--                      - i to enter edit insert mode
 --                      - : to go to status mode
+--                      - v to enter edit visual mode
+--                      - p to paste
 --                      - Esc to go to base mode
---   InserMode          - Escape to enter edit mode
+--   EditMode.Insert    - Escape to enter edit mode
 --                      - typing modifies text contents of the box
+--   EditMode.Visual    - select a region and copy it
 data Mode = 
     BaseMode 
   | SelectMode (Pos,Pos) SelectAction
   | StatusMode
-  | EditMode Id Box String
-  | InsertMode
+  | EditMode Id Box EditStr EditState
 
 data SelectAction = SNewNote
+data EditState = EditInsert | EditVisual | EditBase
 
 -- The region covered by Box l r u d
 -- is [l,r] x [u,d]

@@ -22,6 +22,8 @@ import Notesack.Types
 import Notesack.Database
 import Notesack.Misc 
 import Notesack.Boundary
+import Notesack.EditStr ( EditStr )
+import qualified Notesack.EditStr as E
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -61,12 +63,21 @@ mainExcept _ _ = throwError "Usage: notesack FILE"
 getInitNotes viewId (x,y) (nx, ny) = do
   notesInfo <- getNotesInArea viewId (Box x (x+nx-1) y (y+ny-1))
   let fix (noteId, box, text) = do
-        img <- toImage viewId box text
+        img <- toImageText viewId box text
         return (noteId, img)
   mapM fix notesInfo
 
-toImage :: String -> Box -> String -> ExceptM Image
-toImage viewId box@(Box il ir iu id) text = do
+toImageText  :: String -> Box -> String -> ExceptM Image
+toImageText viewId box = 
+  E.fromText (boxWidth box - 2) .> E.toLines .> toImageLines viewId box
+
+toImageLines :: String -> Box -> [String] -> ExceptM Image
+toImageLines viewId box lines = 
+  let img = (I.vertCat $ map (I.string defAttr) lines) |> 
+              I.resize (boxWidth box - 2) (boxHeight box - 2)
+   in toImage' viewId box img 
+
+toImage' viewId box@(Box il ir iu id) textImg = do
         neighbors <- getNeighbors viewId box
         let (top, sides, bot) = boundary box neighbors
             (lSide, rSide) = unzip sides
@@ -75,10 +86,8 @@ toImage viewId box@(Box il ir iu id) text = do
             tImg = I.string defAttr top
             bImg = I.string defAttr bot
             numN = length neighbors
-            textImg = charFill defAttr (head $ show numN) (ir-il-1) (id-iu-1)
             img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
         return img 
-
 
 sackInteract :: Bool -> Sack ()
 sackInteract shouldExit =
@@ -121,12 +130,12 @@ handleEventMode BaseMode (EvKey KEnter []) = do
          state <- get
          put state{ 
           notesInView = filter (fst .> (/= noteId)) (notesInView state),
-          mode = EditMode noteId box text }
+          mode = EditMode noteId box (E.fromText (boxWidth box - 2 ) text) EditBase }
   return False 
 
 -- move the cursor but only within the boundaries of the box
 handleEventMode 
-  (EditMode _ box _) 
+  (EditMode _ box _ EditBase) 
   (EvKey (KChar c) []) | c `elem` "hjkl" =
     do aNewCursor <- moveLoc (dirFromChar c) <$> getCursor
        if onBoundary box aNewCursor
@@ -134,15 +143,58 @@ handleEventMode
           else putCursor aNewCursor >> return False
 
 -- exit edit mode
-handleEventMode (EditMode noteId box text) (EvKey KEsc []) = do
+handleEventMode (EditMode noteId box editStr EditBase) (EvKey KEsc []) = do
   -- (1) put the note back into the cache
   -- (2) save it (TODO)
   viewId <- getViewId
-  img <- lift $ toImage viewId box text
+  img <- lift $ toImageText viewId box (E.toText editStr)
   state <- get
   put state{ notesInView = (noteId, img):(notesInView state),
              mode = BaseMode }
   return False
+
+-- enter edit.insert mode
+handleEventMode 
+  (EditMode noteId box@(Box l r u d) editStr EditBase) 
+  (EvKey (KChar 'i') []) = do
+    (cl,cu) <- getCursor
+    let (x,y) = (cl-(l+1), cu-(u+1))
+        (x',y') = E.snapCursor editStr (x,y)
+    putCursor (x'+(l+1), y'+(u+1))
+    putMode (EditMode noteId box editStr EditInsert)
+    return False
+
+-- write c at the cursor location (in edit.insert)
+handleEventMode 
+  (EditMode a box@(Box l r u d) editStr EditInsert) 
+  (EvKey (KChar c) []) = do
+    (cl,cu) <- getCursor
+    let (x,y) = (cl-(l+1), cu-(u+1))
+        ((x',y'), newEditStr) = E.insert editStr (x,y) c
+    putCursor (x'+(l+1), y'+(u+1))
+    putMode (EditMode a box newEditStr EditInsert)
+    return False
+
+-- Treat enter as a new line character in terms of edit.insert
+handleEventMode 
+  (EditMode a b c EditInsert) 
+  (EvKey KEnter []) = 
+    handleEventMode (EditMode a b c EditInsert) (EvKey (KChar '\n') [])
+
+-- delete in edit.insert mode
+handleEventMode
+  (EditMode a box@(Box l r u d) editStr EditInsert)
+  (EvKey KDel []) = do
+    (cl,cu) <- getCursor
+    let (x,y) = (cl-(l+1), cu-(u+1))
+        ((x',y'), newEditStr) = E.delete editStr (x,y) 
+    putCursor (x'+(l+1), y'+(u+1))
+    putMode (EditMode a box newEditStr EditInsert)
+    return False
+
+-- exit edit.insert mode
+handleEventMode (EditMode a b c EditInsert) (EvKey KEsc []) =
+  putMode (EditMode a b c EditBase) >> return False
 
 -- enter select mode
 handleEventMode BaseMode (EvKey (KChar ' ') []) = do
@@ -211,10 +263,10 @@ drawSack = do
   let cursorObj = AbsoluteCursor x y
   modeImage <-
     case mode of
-      (SelectMode (xx,yy) _) -> return $ imageBox blue (toBox (x,y) (xx,yy))
-      (EditMode _ box text)  -> do viewId <- getViewId
-                                   lift $ toImage viewId box text
-      _                      -> return emptyImage
+      (SelectMode (xx,yy) _)   -> return $ imageBox blue (toBox (x,y) (xx,yy))
+      (EditMode _ box editStr _) -> do viewId <- getViewId
+                                       lift $ toImageText viewId box (E.toText editStr)
+      _                        -> return emptyImage
   noteImages <- (map snd . notesInView) <$> get
   
   let allImages = modeImage:noteImages
@@ -235,7 +287,7 @@ addNoteToView _ box text = do
   lift $ addTn  tn
   
   state <- get
-  img <- lift $ toImage viewId box text
+  img <- lift $ toImageText viewId box text
   put state { notesInView = (noteId, img):(notesInView state) }
 
 newNoteId :: Sack Id
@@ -274,3 +326,8 @@ notesackShutdown = closeDatabase
 onBoundary :: Box -> (Pos, Pos) -> Bool
 onBoundary (Box ll rr uu dd) (l, u) = ll == l || rr == l || uu == u || dd == u
 
+boxWidth  :: Box -> Int
+boxWidth  (Box l r _ _) = r - l + 1
+
+boxHeight  :: Box -> Int
+boxHeight (Box _ _ u d) = d - u + 1
