@@ -147,7 +147,7 @@ handleEventMode (EditMode noteId box editStr EditBase) (EvKey KEsc []) = do
   -- (1) put the note back into the cache
   -- (2) save it (TODO)
   viewId <- getViewId
-  img <- lift $ toImageText viewId box (E.toText editStr)
+  img <- lift $ toImageLines viewId box (E.toLines editStr)
   state <- get
   put state{ notesInView = (noteId, img):(notesInView state),
              mode = BaseMode }
@@ -191,6 +191,18 @@ handleEventMode
     putCursor (x'+(l+1), y'+(u+1))
     putMode (EditMode a box newEditStr EditInsert)
     return False
+
+-- backspace in edit.insert mode
+handleEventMode
+  (EditMode a box@(Box l r u d) editStr EditInsert)
+  (EvKey KBS []) = do
+    (cl,cu) <- getCursor
+    let (x,y) = (cl-(l+1), cu-(u+1))
+        ((x',y'), newEditStr) = E.backspace editStr (x,y) 
+    putCursor (x'+(l+1), y'+(u+1))
+    putMode (EditMode a box newEditStr EditInsert)
+    return False
+-- TODO: abstract these functions
 
 -- exit edit.insert mode
 handleEventMode (EditMode a b c EditInsert) (EvKey KEsc []) =
@@ -265,7 +277,7 @@ drawSack = do
     case mode of
       (SelectMode (xx,yy) _)   -> return $ imageBox blue (toBox (x,y) (xx,yy))
       (EditMode _ box editStr _) -> do viewId <- getViewId
-                                       lift $ toImageText viewId box (E.toText editStr)
+                                       lift $ toImageLines viewId box (E.toLines editStr)
       _                        -> return emptyImage
   noteImages <- (map snd . notesInView) <$> get
   
