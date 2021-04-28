@@ -5,7 +5,7 @@ module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
   hasView, addTv, addTvn, addTn,
   areaHasNote, maxNoteId, getNotesInArea,
-  getNeighbors
+  getNeighbors, updateNote
 ) where
 
 import Foreign.Ptr
@@ -17,6 +17,7 @@ import Control.Monad.RWS
 import Control.Monad.Except
 
 import Notesack.Types
+import Notesack.Misc
 
 
 hasView :: String -> ExceptM Bool
@@ -75,12 +76,13 @@ maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 getNotesInArea :: String -> Box -> ExceptM [(Id, Box, String)]
 getNotesInArea viewId (Box l r u d) = 
   let [sl,sr,su,sd] = map show [l,r,u,d]
-      sql = unlines $ [
+      sqlStr = unlines $ [
         "SELECT Note.NoteId, Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
         "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
         "  AND Note.NoteId == ViewNote.NoteId           ",
-        "  AND ViewNote.ViewId == "++viewId++"         ;"]
+        "  AND ViewNote.ViewId == \"%w\";"]
+      sql = SqlQuery sqlStr [viewId]
       e = "getNotesInArea"
       fixRow (which:txt:positions) =
         let [l,r,u,d] = map fromObjInt positions
@@ -90,26 +92,41 @@ getNotesInArea viewId (Box l r u d) =
 getNeighbors :: String -> Box -> ExceptM [Box]
 getNeighbors viewId (Box l r u d) = 
   let [sl,sr,su,sd] = map show [l,r,u,d]
-      sql = unlines $ [
+      sqlStr = unlines $ [
         "SELECT LocL, LocR, LocU, LocD FROM ViewNote",
-        "WHERE ViewNote.ViewId == "++viewId,
+        "WHERE ViewNote.ViewId == \"%w\"",
         "  AND MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
         "  AND (LocL != "++sl++" OR LocR != "++sr++" OR ",
         "       LocU != "++su++" OR LocD != "++sd++");"]
+      sql = SqlQuery sqlStr [viewId]
       e = "getNeighbors"
       fixRow items = 
         let [a,b,c,d] = map fromObjInt items
          in Box a b c d
    in map fixRow <$> getTable e sql [SqlInt, SqlInt, SqlInt, SqlInt]
 
+-- TODO: remove the sql injection (probably just use
+-- mprintf, but will need to free the memory
+updateNote :: Id -> String -> ExceptM ()
+updateNote noteId text = 
+  do today <- lift $ getDate
+     withSqlQuery (sql today) (lift . i_exec)
+  where sql today = SqlQuery (query today) [text]
+        query today = unlines [
+          "UPDATE Note ",
+          "SET Text = \"%w\",",
+          "    DateChanged = "++show today,
+          "WHERE NoteId = "++show noteId++";"]
+
+data SqlQuery = SqlQuery String [String]
 data SqlType = SqlInt | SqlText
 data SqlObj = ObjInt Int | ObjText String
 fromObjInt (ObjInt i) = i
 fromObjText (ObjText s) = s
-getTable :: String -> String -> [SqlType] -> ExceptM [[SqlObj]]
-getTable err sql columns = do
-  handle <- libCall err $ withCString sql stmt_init
+getTable :: String -> SqlQuery -> [SqlType] -> ExceptM [[SqlObj]]
+getTable err sqlQ columns = withSqlQuery sqlQ $ \sql -> do
+  handle <- libCall err $ stmt_init sql
   let incrementHandle = (==1) <$> (libCall err $ stmt_increment handle)
       getColumn (SqlInt, i) = (ObjInt . fromIntegral) <$> 
         (libCall err $ stmt_column_int handle i)
@@ -119,6 +136,27 @@ getTable err sql columns = do
   ret <- doUntil incrementHandle getInfo
   libCall err $ stmt_finalize handle
   return ret
+
+withSqlQuery :: SqlQuery -> (CString -> ExceptM a) -> ExceptM a
+withSqlQuery (SqlQuery sql []) f = do
+  sqlC <- lift $ newCString sql 
+  ret <- f sqlC
+  lift $ free sqlC
+  return ret 
+withSqlQuery (SqlQuery sql [arg1]) f = do
+  let newCString'   a   = lift $ newCString a
+      mprintf1'     a b = lift $ mprintf1 a b
+      free'         a   = lift $ free a
+      free_mprintf' a   = lift $ free_mprintf a
+  sqlC <- newCString' sql
+  arg1 <- newCString' arg1
+  sqlFinished <- mprintf1' sqlC arg1
+  ret <- f sqlFinished
+  free' sqlC
+  free' arg1
+  free_mprintf' sqlFinished
+  return ret
+withSqlQuery _ _ = error "Not implemented; Can only replace 1 string in a sql query"
 
 doUntil :: Monad m => m Bool -> m a -> m [a]
 doUntil checkIt doIt = 
@@ -176,4 +214,7 @@ foreign import ccall "interface.h stmt_column_blob"
   stmt_column_blob :: Ptr () -> CInt -> IO (Ptr ())
 foreign import ccall "interface.h stmt_column_text"
   stmt_column_text :: Ptr () -> CInt -> IO CString
-
+foreign import ccall "interface.h mprintf1"
+  mprintf1 :: CString -> CString -> IO CString
+foreign import ccall "interface.h free_mprintf"
+  free_mprintf :: CString -> IO ()

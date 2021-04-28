@@ -147,6 +147,7 @@ handleEventMode (EditMode noteId box editStr EditInsert) (EvKey KEsc []) = do
   state <- get
   put state{ notesInView = (noteId, img):(notesInView state),
              mode = BaseMode }
+  lift $ updateNote noteId (E.toText editStr)
   return False
 
 -- write c at the cursor location (in edit.insert)

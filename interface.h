@@ -39,6 +39,8 @@ extern "C" {
   float_t   stmt_column_double(sqlite3_stmt** ppStmt, int column);
   blob_t    stmt_column_blob  (sqlite3_stmt** ppStmt, int column);
   text_t    stmt_column_text  (sqlite3_stmt** ppStmt, int column);
+  char* mprintf1(const char* sql, const char* arg);
+  void free_mprintf(char* ptr);
 }
 
 ///////////////////////////////////////////////////////////////////////////////

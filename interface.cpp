@@ -163,6 +163,11 @@ text_t stmt_column_text(sqlite3_stmt** ppStmt, int column) {
   return sqlite3_column_text(*ppStmt, column);
 }
 
-
+char* mprintf1(const char* sql, const char* arg) {
+  return sqlite3_mprintf(sql, arg);
+}
+void free_mprintf(char* ptr) {
+  sqlite3_free(ptr); 
+}
 
 
