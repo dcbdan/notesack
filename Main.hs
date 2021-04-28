@@ -155,25 +155,19 @@ handleEventMode (EditMode noteId box editStr EditBase) (EvKey KEsc []) = do
 
 -- enter edit.insert mode
 handleEventMode 
-  (EditMode noteId box@(Box l r u d) editStr EditBase) 
+  mode@(EditMode _ _ _ EditBase)
   (EvKey (KChar 'i') []) = do
-    (cl,cu) <- getCursor
-    let (x,y) = (cl-(l+1), cu-(u+1))
-        (x',y') = E.snapCursor editStr (x,y)
-    putCursor (x'+(l+1), y'+(u+1))
-    putMode (EditMode noteId box editStr EditInsert)
-    return False
+    handleInsertModeHelper mode f
+      where f editStr cursor = 
+              let newCursor = E.snapCursor editStr cursor
+               in (newCursor, editStr)
 
 -- write c at the cursor location (in edit.insert)
 handleEventMode 
-  (EditMode a box@(Box l r u d) editStr EditInsert) 
-  (EvKey (KChar c) []) = do
-    (cl,cu) <- getCursor
-    let (x,y) = (cl-(l+1), cu-(u+1))
-        ((x',y'), newEditStr) = E.insert editStr (x,y) c
-    putCursor (x'+(l+1), y'+(u+1))
-    putMode (EditMode a box newEditStr EditInsert)
-    return False
+  mode@(EditMode _ _ _ EditInsert)
+  (EvKey (KChar c) []) = 
+    handleInsertModeHelper mode f
+      where f editStr cursor = E.insert editStr cursor c
 
 -- Treat enter as a new line character in terms of edit.insert
 handleEventMode 
@@ -183,26 +177,17 @@ handleEventMode
 
 -- delete in edit.insert mode
 handleEventMode
-  (EditMode a box@(Box l r u d) editStr EditInsert)
-  (EvKey KDel []) = do
-    (cl,cu) <- getCursor
-    let (x,y) = (cl-(l+1), cu-(u+1))
-        ((x',y'), newEditStr) = E.delete editStr (x,y) 
-    putCursor (x'+(l+1), y'+(u+1))
-    putMode (EditMode a box newEditStr EditInsert)
-    return False
+  mode@(EditMode _ _ _ EditInsert)
+  (EvKey KDel []) =
+    handleInsertModeHelper mode f
+      where f = E.delete
 
 -- backspace in edit.insert mode
 handleEventMode
-  (EditMode a box@(Box l r u d) editStr EditInsert)
-  (EvKey KBS []) = do
-    (cl,cu) <- getCursor
-    let (x,y) = (cl-(l+1), cu-(u+1))
-        ((x',y'), newEditStr) = E.backspace editStr (x,y) 
-    putCursor (x'+(l+1), y'+(u+1))
-    putMode (EditMode a box newEditStr EditInsert)
-    return False
--- TODO: abstract these functions
+  mode@(EditMode _ _ _ EditInsert) 
+  (EvKey KBS []) = 
+    handleInsertModeHelper mode f
+      where f = E.backspace
 
 -- exit edit.insert mode
 handleEventMode (EditMode a b c EditInsert) (EvKey KEsc []) =
@@ -261,6 +246,24 @@ handleEventMode (SelectMode (x,y) action) (EvKey (KChar c) []) | c `elem` "hjkl"
         return False
 
 handleEventMode _ _ = return False
+
+handleInsertModeHelper :: 
+  Mode -> 
+  (EditStr -> (Pos,Pos) -> ((Pos,Pos),EditStr)) -> 
+  Sack Bool
+handleInsertModeHelper
+  (EditMode a box@(Box l r u d) editStr _)
+  f = do
+  (cl,cu) <- getCursor
+  let (x,y) = (cl-(l+1), cu-(u+1))
+      ((x',y'), newEditStr) = f editStr (x,y)
+      (cl',cu') = (x'+(l+1), y'+(u+1))
+  if cl' > l && cl' <= r && cu' > u && cu' < d
+     then do putCursor (cl',cu')
+             putMode (EditMode a box newEditStr EditInsert)
+     else return ()
+  return False
+
 
 dirFromChar 'h' = DirL
 dirFromChar 'j' = DirD
