@@ -112,7 +112,7 @@ handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "hjkl" =
 handleEventMode BaseMode (EvKey (KChar ':') []) = error "not implemented"
 
 -- Try to enter edit mode
-handleEventMode BaseMode (EvKey KEnter []) = do
+handleEventMode BaseMode event | isEnterOrI event = do
   viewId <- getViewId
   cursor@(l,u) <- getCursor
   notesInfo <- lift $ getNotesInArea viewId (Box l l u u)
@@ -128,22 +128,18 @@ handleEventMode BaseMode (EvKey KEnter []) = do
       do -- 1) remove the note from the cache
          -- 2) update the mode
          state <- get
+         let newMode = EditMode noteId box (E.fromText (boxWidth box - 2 ) text) EditInsert
          put state{ 
-          notesInView = filter (fst .> (/= noteId)) (notesInView state),
-          mode = EditMode noteId box (E.fromText (boxWidth box - 2 ) text) EditBase }
+           notesInView = filter (fst .> (/= noteId)) (notesInView state),
+           mode = newMode }
+         handleInsertModeHelper newMode f >> return ()
+           where f editStr cursor = 
+                   let newCursor = E.snapCursor editStr cursor
+                    in (newCursor, editStr)
   return False 
 
--- move the cursor but only within the boundaries of the box
-handleEventMode 
-  (EditMode _ box _ EditBase) 
-  (EvKey (KChar c) []) | c `elem` "hjkl" =
-    do aNewCursor <- moveLoc (dirFromChar c) <$> getCursor
-       if onBoundary box aNewCursor
-          then return False
-          else putCursor aNewCursor >> return False
-
 -- exit edit mode
-handleEventMode (EditMode noteId box editStr EditBase) (EvKey KEsc []) = do
+handleEventMode (EditMode noteId box editStr EditInsert) (EvKey KEsc []) = do
   -- (1) put the note back into the cache
   -- (2) save it (TODO)
   viewId <- getViewId
@@ -152,15 +148,6 @@ handleEventMode (EditMode noteId box editStr EditBase) (EvKey KEsc []) = do
   put state{ notesInView = (noteId, img):(notesInView state),
              mode = BaseMode }
   return False
-
--- enter edit.insert mode
-handleEventMode 
-  mode@(EditMode _ _ _ EditBase)
-  (EvKey (KChar 'i') []) = do
-    handleInsertModeHelper mode f
-      where f editStr cursor = 
-              let newCursor = E.snapCursor editStr cursor
-               in (newCursor, editStr)
 
 -- write c at the cursor location (in edit.insert)
 handleEventMode 
@@ -188,10 +175,6 @@ handleEventMode
   (EvKey KBS []) = 
     handleInsertModeHelper mode f
       where f = E.backspace
-
--- exit edit.insert mode
-handleEventMode (EditMode a b c EditInsert) (EvKey KEsc []) =
-  putMode (EditMode a b c EditBase) >> return False
 
 -- enter select mode
 handleEventMode BaseMode (EvKey (KChar ' ') []) = do
@@ -346,3 +329,6 @@ boxWidth  (Box l r _ _) = r - l + 1
 
 boxHeight  :: Box -> Int
 boxHeight (Box _ _ u d) = d - u + 1
+
+isEnterOrI event = event == (EvKey KEnter []) || event == (EvKey (KChar 'i') []) 
+

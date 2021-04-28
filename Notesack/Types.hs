@@ -46,7 +46,7 @@ data Mode =
   | EditMode Id Box EditStr EditState
 
 data SelectAction = SNewNote
-data EditState = EditInsert | EditVisual | EditBase
+data EditState = EditInsert | EditVisual
 
 -- The region covered by Box l r u d
 -- is [l,r] x [u,d]
