@@ -52,15 +52,11 @@ mainExcept vty [filename] = do
   initWindowSize <- liftIO getWindowSize
   initNotesInView <- getInitNotes today loc initWindowSize
   let initEnv = Env vty SackConfig
-      initPicture = Picture {
-        picCursor = AbsoluteCursor (tvL - locL) (tvU - locU),
-        picLayers = map snd initNotesInView, 
-        picBackground = Background ' ' defAttr }
       initState = State 
         today
         loc
         BaseMode
-        loc
+        tvCursor
         initWindowSize
         initNotesInView
   execRWST (drawSack >> sackInteract False) initEnv initState >> return ()  
@@ -95,7 +91,7 @@ handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "hjkl" =
 -- Just move the view
 -- (I'd like to use the control modifier, but for some reason, vty
 --  wasn't picking up the ctrl + hkjl combo correctly for all of em)
-handleEventMode _ (EvKey (KChar c) []) | c `elem` "HJKL" = 
+handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "HJKL" = 
   let dir = dirFromChar (toLower c)
    in (moveLoc dir <$> getViewLoc) 
         >>= resetViewLoc 

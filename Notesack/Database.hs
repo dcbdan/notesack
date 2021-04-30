@@ -27,7 +27,7 @@ lookupView :: String -> ExceptM ((Pos,Pos), (Pos,Pos))
 lookupView id =
   let sqlStr = "SELECT LocX, LocY, CurX, CurY FROM View WHERE ViewId == \"%w\";"
       sql = SqlQuery sqlStr [id]
-      e = "lookupViewLoc"
+      e = "lookupView"
       fixRow items = 
         let [a,b,c,d] = map fromObjInt items
          in ((a,b),(c,d))
