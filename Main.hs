@@ -24,6 +24,7 @@ import Notesack.Misc
 import Notesack.Boundary
 import Notesack.EditStr ( EditStr )
 import qualified Notesack.EditStr as E
+import Data.Char ( toLower )
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -90,6 +91,16 @@ handleEventMode BaseMode (EvKey KEsc []) = do
 -- Just move the cursor
 handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "hjkl" = 
   putMoveCursor (dirFromChar c) >> return False
+
+-- Just move the view
+-- (I'd like to use the control modifier, but for some reason, vty
+--  wasn't picking up the ctrl + hkjl combo correctly for all of em)
+handleEventMode _ (EvKey (KChar c) []) | c `elem` "HJKL" = 
+  let dir = dirFromChar (toLower c)
+   in (moveLoc dir <$> getViewLoc) 
+        >>= resetViewLoc 
+        >>  unlessM cursorOnScreen (putMoveCursor dir)
+        >>  return False
 
 -- Enter status mode
 handleEventMode BaseMode (EvKey (KChar ':') []) = error "not implemented"
@@ -235,7 +246,6 @@ handleInsertModeHelper
 --   If it isn't, slide the view such that the cursor is on the edge of the screen.
 repositionCursorOnScreen :: Sack ()
 repositionCursorOnScreen = do
-  viewId <- getViewId
   (l,u) <- getViewLoc
   (x,y) <- getCursor
   (wx,wy) <- windowSize <$> get
@@ -248,10 +258,23 @@ repositionCursorOnScreen = do
                  (True,_) -> y
                  (_,True) -> y + 1 - wy
                  _        -> u
-    newNotesInView <- lift $ getInitNotes viewId (newL,newU) (wx,wy)
-    stateIn <- get
-    put $ stateIn{ viewLoc = (newL,newU),
-                   notesInView = newNotesInView }
+    resetViewLoc (newL,newU)
+
+resetViewLoc :: (Pos,Pos) -> Sack ()
+resetViewLoc (newL,newU) = do
+  (wx,wy) <- windowSize <$> get
+  viewId <- getViewId
+  newNotesInView <- lift $ getInitNotes viewId (newL,newU) (wx,wy)
+  stateIn <- get
+  put $ stateIn{ viewLoc = (newL,newU),
+                 notesInView = newNotesInView }
+
+cursorOnScreen :: Sack Bool
+cursorOnScreen = do
+  (l,u) <- getViewLoc
+  (x,y) <- getCursor
+  (wx,wy) <- windowSize <$> get
+  return $ not (x >= l+wx || x < l || y >= u+wy || y < u)
 
 dirFromChar 'h' = DirL
 dirFromChar 'j' = DirD
@@ -359,6 +382,9 @@ toBox (x1,y1) (x2,y2) = Box (min x1 x2) (max x1 x2) (min y1 y2) (max y1 y2)
 unlessM bool v = do
   maybeSo <- bool
   unless maybeSo v
+whenM bool v = do
+  maybeSo <- bool
+  when maybeSo v
 
 -- If we have the view, let it be the view,
 -- otherwise, add the view
