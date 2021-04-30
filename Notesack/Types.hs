@@ -3,7 +3,7 @@ module Notesack.Types (
   SackConfig(..), Env(..), State(..), Mode(..), SelectAction(..), EditState(..),
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..),Pos,Id,Box(..),
-  askVty, askSackConfig, getView, getViewId, getMode, putMode,
+  askVty, askSackConfig, getView, getViewId, getMode, putMode, 
   getCursor, putCursor, putMoveCursor, moveLoc
 ) where
 
@@ -63,10 +63,14 @@ data Env = Env {
   envSackConfig :: SackConfig
 }
 
+-- the loc on the tableView is the global position
+-- all boxes need to be global as well
+-- all images need to be translated with respect to the tvLoc
+-- the cursor is the global cursor
 data State = State { 
-  tableView :: TableView,
+  tableView :: TableView,         
   mode :: Mode,
-  cursor :: (Pos,Pos),
+  cursor :: (Pos,Pos),           
   windowSize :: (Int,Int),
   notesInView :: [(Int, Image)]
 }
@@ -76,7 +80,7 @@ data State = State {
 data TableView = TableView {
   tvViewId :: String,
   tvLoc :: (Pos,Pos),
-  tvSelected :: Maybe Id 
+  tvSelected :: Maybe Id         -- TODO: will need this?
 }
 
 data TableViewNote = TableViewNote {

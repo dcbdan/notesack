@@ -3,7 +3,7 @@
 
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
-  hasView, addTv, addTvn, addTn,
+  hasView, lookupViewLoc, addTv, addTvn, addTn,
   areaHasNote, maxNoteId, getNotesInArea,
   getNeighbors, updateNote
 ) where
@@ -22,6 +22,16 @@ import Notesack.Misc
 
 hasView :: String -> ExceptM Bool
 hasView id = (==1) <$> (libCall "hasView" (withCString id has_view))
+
+lookupViewLoc :: String -> ExceptM (Pos,Pos) 
+lookupViewLoc id =
+  let sqlStr = "SELECT LocX, LocY FROM View WHERE ViewId == \"%w\";"
+      sql = SqlQuery sqlStr [id]
+      e = "lookupViewLoc"
+      fixRow items = 
+        let [a,b] = map fromObjInt items
+         in (a,b)
+   in (fixRow . head) <$> getTable e sql [SqlInt, SqlInt]
 
 addTv :: TableView -> ExceptM ()
 addTv (TableView id (locx,locy) Nothing) = 

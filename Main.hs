@@ -42,57 +42,34 @@ main = do args <- getArgs
 mainExcept vty [filename] = do
   notesackSetup filename
   today <- liftIO getDate
+  -- create the view if it doesn't already exist
   loadView today
+  -- we need the location of the table view
+  -- (it's a bit silly because we may have just
+  --  added this row to the View table, but oh well)
+  loc <- lookupViewLoc today
   initWindowSize <- liftIO getWindowSize
-  initNotesInView <- getInitNotes today (0,0) initWindowSize
+  initNotesInView <- getInitNotes today loc initWindowSize
   let initEnv = Env vty SackConfig
       initPicture = Picture {
         picCursor = AbsoluteCursor 0 0,
         picLayers = map snd initNotesInView, 
         picBackground = Background ' ' defAttr }
       initState = State 
-        (TableView today (0,0) Nothing) 
+        (TableView today loc Nothing)
         BaseMode
-        (0,0) 
+        loc
         initWindowSize
         initNotesInView
   execRWST (drawSack >> sackInteract False) initEnv initState >> return ()  
   notesackShutdown
 mainExcept _ _ = throwError "Usage: notesack FILE"
 
-getInitNotes viewId (x,y) (nx, ny) = do
-  notesInfo <- getNotesInArea viewId (Box x (x+nx-1) y (y+ny-1))
-  let fix (noteId, box, text) = do
-        img <- toImageText viewId box text
-        return (noteId, img)
-  mapM fix notesInfo
-
-toImageText  :: String -> Box -> String -> ExceptM Image
-toImageText viewId box = 
-  E.fromText (boxWidth box - 2) .> E.toLines .> toImageLines viewId box
-
-toImageLines :: String -> Box -> [String] -> ExceptM Image
-toImageLines viewId box lines = 
-  let img = (I.vertCat $ map (I.string defAttr) lines) |> 
-              I.resize (boxWidth box - 2) (boxHeight box - 2)
-   in toImage' viewId box img 
-
-toImage' viewId box@(Box il ir iu id) textImg = do
-        neighbors <- getNeighbors viewId box
-        let (top, sides, bot) = boundary box neighbors
-            (lSide, rSide) = unzip sides
-            lImg = I.vertCat $ map (I.char defAttr) lSide
-            rImg = I.vertCat $ map (I.char defAttr) rSide
-            tImg = I.string defAttr top
-            bImg = I.string defAttr bot
-            numN = length neighbors
-            img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
-        return img 
-
 sackInteract :: Bool -> Sack ()
 sackInteract shouldExit =
   unless shouldExit $ do
     exitNext <- handleNextEvent
+    repositionCursorOnScreen
     drawSack
     sackInteract exitNext
 
@@ -101,7 +78,8 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 
 handleEventMode :: Mode -> Event -> Sack Bool
 
--- For now but this really shouldn't do anything TODO
+-- This should use a status bar instead TODO
+-- Save the location of the view and cursor, and then exit TODO
 handleEventMode BaseMode (EvKey KEsc []) = return True
 
 -- Just move the cursor
@@ -142,8 +120,7 @@ handleEventMode BaseMode event | isEnterOrI event = do
 handleEventMode (EditMode noteId box editStr EditInsert) (EvKey KEsc []) = do
   -- (1) put the note back into the cache
   -- (2) save it (TODO)
-  viewId <- getViewId
-  img <- lift $ toImageLines viewId box (E.toLines editStr)
+  img <- toImageLinesSack box (E.toLines editStr)
   state <- get
   put state{ notesInView = (noteId, img):(notesInView state),
              mode = BaseMode }
@@ -248,24 +225,48 @@ handleInsertModeHelper
      else return ()
   return False
 
+-- Here is the idea:
+--   Check to see of the cursor in not actually on the screen.
+--   If it isn't, slide the view such that the cursor is on the edge of the screen.
+repositionCursorOnScreen :: Sack ()
+repositionCursorOnScreen = do
+  (TableView viewId (l,u) xx) <- getView
+  (x,y) <- getCursor
+  (wx,wy) <- windowSize <$> get
+  when (x >= l+wx || x < l || y >= u+wy || y < u) $ do
+    let newL = case (x < l, x >= l+wx) of
+                 (True,_) -> x
+                 (_,True) -> x + 1 - wx
+                 _        -> l
+        newU = case (y < u, y >= u+wy) of
+                 (True,_) -> y
+                 (_,True) -> y + 1 - wy
+                 _        -> u
+    newNotesInView <- lift $ getInitNotes viewId (newL,newU) (wx,wy)
+    stateIn <- get
+    put $ stateIn{ tableView = TableView viewId (newL,newU) xx,
+                   notesInView = newNotesInView }
 
 dirFromChar 'h' = DirL
 dirFromChar 'j' = DirD
 dirFromChar 'k' = DirU
 dirFromChar 'l' = DirR
 
+-- drawSack only operates with the State; it does not interact with
+-- the database
 drawSack :: Sack ()
 drawSack = do
   vty <- askVty
   (x,y) <- getCursor
+  loc@(locL,locU) <- tvLoc <$> getView
   mode <- getMode
-  let cursorObj = AbsoluteCursor x y
+  let cursorObj = AbsoluteCursor (x-locL) (y-locU)
   modeImage <-
     case mode of
-      (SelectMode (xx,yy) _)   -> return $ imageBox blue (toBox (x,y) (xx,yy))
-      (EditMode _ box editStr _) -> do viewId <- getViewId
-                                       lift $ toImageLines viewId box (E.toLines editStr)
-      _                        -> return emptyImage
+      (SelectMode (xx,yy) _)     -> return $ imageBox blue $ 
+                                      shiftBox loc $ (toBox (x,y) (xx,yy))
+      (EditMode _ box editStr _) -> toImageLinesSack box (E.toLines editStr)
+      _                          -> return emptyImage
   noteImages <- (map snd . notesInView) <$> get
   
   let allImages = modeImage:noteImages
@@ -274,11 +275,60 @@ drawSack = do
         picBackground = Background ' ' defAttr }
   liftIO $ update vty picture 
 
+getInitNotes viewId (x,y) (nx, ny) = do
+  notesInfo <- getNotesInArea viewId (Box x (x+nx-1) y (y+ny-1))
+  let fix (noteId, box@(Box l r u d), text) = do
+        img <- toImageText (x,y) viewId box text
+        return (noteId, img)
+  mapM fix notesInfo
+
+-- Get the viewId, and the the location. Call toImageLines
+toImageLinesSack :: Box -> [String] -> Sack Image
+toImageLinesSack box lines = do
+  viewId <- getViewId
+  loc <- tvLoc <$> getView
+  lift $ toImageLines loc viewId box lines
+
+-- The ExceptM toImage functions are still with respect to the 
+-- Sack coordinate system, hence passing in the loc argument.
+-- This is so that getNeighbors can be called and make sense.
+toImageText  :: (Pos,Pos) -> String -> Box -> String -> ExceptM Image
+toImageText loc viewId box = 
+  E.fromText (boxWidth box - 2) .> E.toLines .> toImageLines loc viewId box
+
+toImageLines :: (Pos,Pos) -> String -> Box -> [String] -> ExceptM Image
+toImageLines loc viewId box lines = 
+  let img = (I.vertCat $ map (I.string defAttr) lines) |> 
+              I.resize (boxWidth box - 2) (boxHeight box - 2)
+   in toImage' loc viewId box img 
+
+toImage' loc viewId box textImg = do
+        let (Box il ir iu id) = shiftBox loc box
+        neighbors <- getNeighbors viewId box
+        let (top, sides, bot) = boundary box neighbors
+            (lSide, rSide) = unzip sides
+            lImg = I.vertCat $ map (I.char defAttr) lSide
+            rImg = I.vertCat $ map (I.char defAttr) rSide
+            tImg = I.string defAttr top
+            bImg = I.string defAttr bot
+            numN = length neighbors
+            img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
+        return img 
+
+shiftBox :: (Pos,Pos) -> Box -> Box
+shiftBox (locL,locU) (Box l r u d) = Box (l-locL) (r-locL) (u-locU) (d-locU)
+
+wrtLoc :: Box -> Sack Box
+wrtLoc (Box l r u d) = do
+  (locL,locU) <- tvLoc <$> getView
+  return $ Box (l-locL) (r-locL) (u-locU) (d-locU)
+
 -- this funciton is assuming box is in view
 addNoteToView :: SelectAction -> Box -> String -> Sack ()
 addNoteToView _ box text = do
   today <- liftIO getDate
   viewId <- getViewId
+  viewLoc <- tvLoc <$> getView
   noteId <- newNoteId
   let tvn = TableViewNote viewId noteId box
       tn  = TableNote noteId "" today today
@@ -286,7 +336,7 @@ addNoteToView _ box text = do
   lift $ addTn  tn
   
   state <- get
-  img <- lift $ toImageText viewId box text
+  img <- lift $ toImageText viewLoc viewId box text
   put state { notesInView = (noteId, img):(notesInView state) }
 
 newNoteId :: Sack Id
