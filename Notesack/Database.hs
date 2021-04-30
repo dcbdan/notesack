@@ -3,7 +3,7 @@
 
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
-  hasView, lookupViewLoc, addTv, addTvn, addTn,
+  hasView, lookupView, addTv, addTvn, addTn, saveView,
   areaHasNote, maxNoteId, getNotesInArea,
   getNeighbors, updateNote
 ) where
@@ -23,24 +23,34 @@ import Notesack.Misc
 hasView :: String -> ExceptM Bool
 hasView id = (==1) <$> (libCall "hasView" (withCString id has_view))
 
-lookupViewLoc :: String -> ExceptM (Pos,Pos) 
-lookupViewLoc id =
-  let sqlStr = "SELECT LocX, LocY FROM View WHERE ViewId == \"%w\";"
+lookupView :: String -> ExceptM ((Pos,Pos), (Pos,Pos))
+lookupView id =
+  let sqlStr = "SELECT LocX, LocY, CurX, CurY FROM View WHERE ViewId == \"%w\";"
       sql = SqlQuery sqlStr [id]
       e = "lookupViewLoc"
       fixRow items = 
-        let [a,b] = map fromObjInt items
-         in (a,b)
-   in (fixRow . head) <$> getTable e sql [SqlInt, SqlInt]
+        let [a,b,c,d] = map fromObjInt items
+         in ((a,b),(c,d))
+   in (fixRow . head) <$> getTable e sql [SqlInt, SqlInt, SqlInt, SqlInt]
+
+saveView :: String -> (Pos,Pos) -> (Pos,Pos) -> ExceptM ()
+saveView viewId (a,b) (c,d) =
+  let sqlStr = unlines [
+        "UPDATE View ",
+        "SET LocX = "++show a ++ ",",
+        "    LocY = "++show b ++ ",",
+        "    CurX = "++show c ++ ",",
+        "    CurY = "++show d,
+        "WHERE ViewId = \"%w\";"]
+   in exec "saveView" (SqlQuery sqlStr [viewId]) 
 
 addTv :: TableView -> ExceptM ()
-addTv (TableView id (locx,locy) Nothing) = 
-  libCall "could not add view" $ 
-    withCString id $ \i -> add_view_no_selected i (fromIntegral locx) (fromIntegral locy)
-addTv (TableView id (locx,locy) (Just selected)) = 
-  libCall "could not add view" $ 
-    withCString id $ \i -> add_view i (fromIntegral locx) (fromIntegral locy) (fromIntegral selected)
-
+addTv (TableView id (a,b) (c,d)) =
+  let sqlStr = unlines $ [
+        "INSERT INTO View ( ViewId, LocX, LocY, CurX, CurY ) ",
+        "VALUES( \"%w\","++show a++","++show b++","++show c++","++show d++");"]
+      sql = SqlQuery sqlStr [id]
+   in exec "add view" sql
 
 addTvn :: TableViewNote -> ExceptM ()
 addTvn (TableViewNote viewId noteId' (Box l' r' u' d')) =
@@ -116,12 +126,10 @@ getNeighbors viewId (Box l r u d) =
          in Box a b c d
    in map fixRow <$> getTable e sql [SqlInt, SqlInt, SqlInt, SqlInt]
 
--- TODO: remove the sql injection (probably just use
--- mprintf, but will need to free the memory
 updateNote :: Id -> String -> ExceptM ()
 updateNote noteId text = 
   do today <- lift $ getDate
-     withSqlQuery (sql today) (lift . i_exec)
+     exec "updateNote" (sql today)
   where sql today = SqlQuery (query today) [text]
         query today = unlines [
           "UPDATE Note ",
@@ -146,6 +154,10 @@ getTable err sqlQ columns = withSqlQuery sqlQ $ \sql -> do
   ret <- doUntil incrementHandle getInfo
   libCall err $ stmt_finalize handle
   return ret
+
+-- TODO: does i_exec even do error thing?
+exec :: String -> SqlQuery -> ExceptM ()
+exec err sqlQ = withSqlQuery sqlQ $ \sql -> libCall err (i_exec sql)
 
 withSqlQuery :: SqlQuery -> (CString -> ExceptM a) -> ExceptM a
 withSqlQuery (SqlQuery sql []) f = do
@@ -193,10 +205,6 @@ foreign import ccall "interface.h i_close"
   i_close :: IO ()
 foreign import ccall "interface.h i_error"
   i_error :: IO CInt
-foreign import ccall "interface.h add_view_no_selected"
-  add_view_no_selected :: CString -> CInt -> CInt -> IO ()
-foreign import ccall "interface.h add_view"
-  add_view :: CString -> CInt -> CInt -> CInt -> IO ()
 foreign import ccall "interface.h add_view_note"
   add_view_note :: CString -> CInt -> CInt -> CInt -> CInt -> CInt -> IO ()
 foreign import ccall "interface.h add_note"

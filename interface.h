@@ -14,8 +14,6 @@ struct null_t {};
 
 extern "C" {
   void i_init();
-  void add_view_no_selected(const char* view_id, int loc_x, int loc_y);
-  void add_view(const char* view_id, int loc_x, int loc_y, int selected);
   void add_view_note(const char* view_id, int note_id, int l, int r, int u, int d);
   void add_note(int note_id, const char* text, const char* create, const char* change);
   bool has_view(const char* view_id);

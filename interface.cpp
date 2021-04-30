@@ -32,7 +32,8 @@ void i_init() {
        ViewId       Text         PRIMARY KEY,\
        LocX         Integer,    \
        LocY         Integer,    \
-       Selected     Integer );  \
+       CurX         Integer,    \
+       CurY         Integer );  \
      CREATE TABLE ViewNote (    \
        ViewId       Text,       \
        NoteId       Integer,    \
@@ -58,20 +59,6 @@ void i_close() {
 
 int i_error() {
   return error;
-}
-
-void add_view_no_selected(const char* view_id, int loc_x, int loc_y) {
-  schar_ptr_t add_it_sql(sqlite3_mprintf(
-    "INSERT INTO View ( ViewId, LocX, LocY ) "\
-    "VALUES( \"%w\", %d, %d );", view_id, loc_x, loc_y));
-  i_check_(sqlite3_exec(db, add_it_sql.get(), NULL, NULL, NULL));
-}
-
-void add_view(const char* view_id, int loc_x, int loc_y, int note_id) {
-  schar_ptr_t add_it_sql(sqlite3_mprintf(
-    "INSERT INTO View ( ViewId, LocX, LocY, Selected ) "\
-    "VALUES( \"%w\", %d, %d, %d );", view_id, loc_x, loc_y, note_id));
-  i_check_(sqlite3_exec(db, add_it_sql.get(), NULL, NULL, NULL));
 }
 
 void add_view_note(const char* view_id, int note_id, int l, int r, int u, int d) {

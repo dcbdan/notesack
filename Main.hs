@@ -47,16 +47,17 @@ mainExcept vty [filename] = do
   -- we need the location of the table view
   -- (it's a bit silly because we may have just
   --  added this row to the View table, but oh well)
-  loc <- lookupViewLoc today
+  (loc@(locL,locU),tvCursor@(tvL,tvU)) <- lookupView today
   initWindowSize <- liftIO getWindowSize
   initNotesInView <- getInitNotes today loc initWindowSize
   let initEnv = Env vty SackConfig
       initPicture = Picture {
-        picCursor = AbsoluteCursor 0 0,
+        picCursor = AbsoluteCursor (tvL - locL) (tvU - locU),
         picLayers = map snd initNotesInView, 
         picBackground = Background ' ' defAttr }
       initState = State 
-        (TableView today loc Nothing)
+        today
+        loc
         BaseMode
         loc
         initWindowSize
@@ -79,8 +80,12 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 handleEventMode :: Mode -> Event -> Sack Bool
 
 -- This should use a status bar instead TODO
--- Save the location of the view and cursor, and then exit TODO
-handleEventMode BaseMode (EvKey KEsc []) = return True
+handleEventMode BaseMode (EvKey KEsc []) = do
+  viewId <- getViewId 
+  viewLoc <- getViewLoc
+  cursorLoc <- getCursor
+  lift $ saveView viewId viewLoc cursorLoc
+  return True
 
 -- Just move the cursor
 handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "hjkl" = 
@@ -230,7 +235,8 @@ handleInsertModeHelper
 --   If it isn't, slide the view such that the cursor is on the edge of the screen.
 repositionCursorOnScreen :: Sack ()
 repositionCursorOnScreen = do
-  (TableView viewId (l,u) xx) <- getView
+  viewId <- getViewId
+  (l,u) <- getViewLoc
   (x,y) <- getCursor
   (wx,wy) <- windowSize <$> get
   when (x >= l+wx || x < l || y >= u+wy || y < u) $ do
@@ -244,7 +250,7 @@ repositionCursorOnScreen = do
                  _        -> u
     newNotesInView <- lift $ getInitNotes viewId (newL,newU) (wx,wy)
     stateIn <- get
-    put $ stateIn{ tableView = TableView viewId (newL,newU) xx,
+    put $ stateIn{ viewLoc = (newL,newU),
                    notesInView = newNotesInView }
 
 dirFromChar 'h' = DirL
@@ -258,7 +264,7 @@ drawSack :: Sack ()
 drawSack = do
   vty <- askVty
   (x,y) <- getCursor
-  loc@(locL,locU) <- tvLoc <$> getView
+  loc@(locL,locU) <- getViewLoc
   mode <- getMode
   let cursorObj = AbsoluteCursor (x-locL) (y-locU)
   modeImage <-
@@ -286,7 +292,7 @@ getInitNotes viewId (x,y) (nx, ny) = do
 toImageLinesSack :: Box -> [String] -> Sack Image
 toImageLinesSack box lines = do
   viewId <- getViewId
-  loc <- tvLoc <$> getView
+  loc <- getViewLoc
   lift $ toImageLines loc viewId box lines
 
 -- The ExceptM toImage functions are still with respect to the 
@@ -320,7 +326,7 @@ shiftBox (locL,locU) (Box l r u d) = Box (l-locL) (r-locL) (u-locU) (d-locU)
 
 wrtLoc :: Box -> Sack Box
 wrtLoc (Box l r u d) = do
-  (locL,locU) <- tvLoc <$> getView
+  (locL,locU) <- getViewLoc
   return $ Box (l-locL) (r-locL) (u-locU) (d-locU)
 
 -- this funciton is assuming box is in view
@@ -328,7 +334,7 @@ addNoteToView :: SelectAction -> Box -> String -> Sack ()
 addNoteToView _ box text = do
   today <- liftIO getDate
   viewId <- getViewId
-  viewLoc <- tvLoc <$> getView
+  viewLoc <- getViewLoc
   noteId <- newNoteId
   let tvn = TableViewNote viewId noteId box
       tn  = TableNote noteId "" today today
@@ -358,7 +364,7 @@ unlessM bool v = do
 -- otherwise, add the view
 loadView :: String -> ExceptM ()
 loadView viewId = 
-  unlessM (hasView viewId) (addTv (TableView viewId (0,0) Nothing))
+  unlessM (hasView viewId) (addTv (TableView viewId (0,0) (0,0)))
 
 notesackSetup :: String -> ExceptM ()
 notesackSetup dbFile = do 
