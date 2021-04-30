@@ -35,7 +35,10 @@ insert e cursor _ | not (isValidCursor e cursor) = error "invalid cursor"
 insert (E items) (x,y) '\n' = ((0,y+1), E newItems)
   where (lhs,rhs) = Seq.splitAt y $ fixItems y items
         line = Seq.index rhs 0
-        newItems = lhs >< (line <| Seq.empty <| (Seq.drop 1 rhs))
+        (l,r) = if x < Seq.length line
+                   then Seq.splitAt x line
+                   else (line,Seq.empty)
+        newItems = (lhs |> l) >< (r <| Seq.drop 1 rhs)
 
 insert (E items) (x,y) c = ((x+1,y), E newItems)
   where (lhs,rhs) = Seq.splitAt y $ fixItems y items
