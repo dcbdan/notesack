@@ -4,7 +4,8 @@ module Notesack.Types (
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..),Pos,Id,Box(..),
   askVty, askSackConfig, getViewId, getViewLoc, getMode, putMode, 
-  getCursor, putCursor, putMoveCursor, moveLoc
+  getCursor, putCursor, putMoveCursor, moveLoc, nullBox,
+  throwErrorIf
 ) where
 
 import Control.Monad.RWS
@@ -39,18 +40,21 @@ type Id  = Int
 --   EditMode.Insert    - Escape to enter edit mode
 --                      - typing modifies text contents of the box
 --   EditMode.Visual    - select a region and copy it
+--   TODO: update this comment
 data Mode = 
     BaseMode 
   | SelectMode (Pos,Pos) SelectAction
   | StatusMode String
   | EditMode Id Box EditStr EditState
+  | PlaceMode [Id]
 
-data SelectAction = SNewNote
+data SelectAction = SNewNote | SPlace [Id]
 data EditState = EditInsert | EditVisual
 
 -- The region covered by Box l r u d
 -- is [l,r] x [u,d]
 data Box = Box Pos Pos Pos Pos
+nullBox = Box 0 0 0 0
 
 data Dir = DirL | DirR | DirU | DirD
 
@@ -73,7 +77,7 @@ data State = State {
   mode :: Mode,
   cursor :: (Pos,Pos),           
   windowSize :: (Int,Int),
-  notesInView :: [(Int, Image)]
+  notesInView :: [(Id, Image)]
 }
 
 -- We define the tables
@@ -136,3 +140,6 @@ moveLoc DirR (x,y) = (x+1,y)
 moveLoc DirU (x,y) = (x,y-1)
 moveLoc DirD (x,y) = (x,y+1)
 
+throwErrorIf :: Bool -> String -> Sack ()
+throwErrorIf True err = throwError err
+throwErrorIf False _  = return ()

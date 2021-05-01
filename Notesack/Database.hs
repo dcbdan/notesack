@@ -4,8 +4,8 @@
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
   hasView, lookupView, addTv, addTvn, addTn, saveView,
-  areaHasNote, maxNoteId, getNotesInArea,
-  getNeighbors, updateNote
+  areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
+  getNeighbors, updateNote, updateTvn
 ) where
 
 import Foreign.Ptr
@@ -92,16 +92,41 @@ areaHasNote viewId (Box l r u d) =
 maxNoteId :: ExceptM Id
 maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 
--- TODO: is this SQL injection vulnerable? (yes)
+getUnplacedNotes :: String -> ExceptM [Id]
+getUnplacedNotes viewId = 
+  let sqlStr = unlines $ [
+        "SELECT NoteId FROM ViewNote",
+        " WHERE ViewId = \"%w\"",
+        "   AND LocL = 0 AND LocR = 0 AND LocU = 0 AND LocD = 0;"]
+      sql = SqlQuery sqlStr [viewId]
+      e = "getUnplacedNotes"
+      fixRow [x] = fromObjInt x
+   in map fixRow <$> getTable e sql [SqlInt]
+
+updateTvn :: String -> Int -> Box -> ExceptM ()
+updateTvn viewId noteId (Box l r u d) =
+  let [sl,sr,su,sd] = map show [l,r,u,d]
+      sqlStr = unlines $ [
+        "UPDATE ViewNote ", 
+        "SET LocL = "++show l ++ ",",
+        "    LocR = "++show r ++ ",",
+        "    LocU = "++show u ++ ",",
+        "    LocD = "++show d,
+        "WHERE ViewId = \"%w\"",
+        "  AND NoteId = "++show noteId++";"]
+   in exec "update tvn" (SqlQuery sqlStr [viewId])
+
 getNotesInArea :: String -> Box -> ExceptM [(Id, Box, String)]
 getNotesInArea viewId (Box l r u d) = 
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sqlStr = unlines $ [
         "SELECT Note.NoteId, Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
-        "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
+        "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ", -- has intersection
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
-        "  AND Note.NoteId == ViewNote.NoteId           ",
-        "  AND ViewNote.ViewId == \"%w\";"]
+        "  AND (LocL != 0 OR LocR != 0 OR               ", -- remove null boxes
+        "       LocU != 0 OR LocD != 0)                 ",  
+        "  AND Note.NoteId == ViewNote.NoteId           ", -- is the right note
+        "  AND ViewNote.ViewId == \"%w\";"]                -- is the right view
       sql = SqlQuery sqlStr [viewId]
       e = "getNotesInArea"
       fixRow (which:txt:positions) =
@@ -114,10 +139,12 @@ getNeighbors viewId (Box l r u d) =
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sqlStr = unlines $ [
         "SELECT LocL, LocR, LocU, LocD FROM ViewNote",
-        "WHERE ViewNote.ViewId == \"%w\"",
-        "  AND MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ",
+        "WHERE ViewNote.ViewId == \"%w\"",                 -- is the right view
+        "  AND MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ", -- has intersection
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
-        "  AND (LocL != "++sl++" OR LocR != "++sr++" OR ",
+        "  AND (LocL != 0 OR LocR != 0 OR               ", -- remove null boxes
+        "       LocU != 0 OR LocD != 0)                 ", 
+        "  AND (LocL != "++sl++" OR LocR != "++sr++" OR ", -- is not self
         "       LocU != "++su++" OR LocD != "++sd++");"]
       sql = SqlQuery sqlStr [viewId]
       e = "getNeighbors"
