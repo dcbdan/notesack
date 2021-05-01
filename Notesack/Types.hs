@@ -42,7 +42,7 @@ type Id  = Int
 data Mode = 
     BaseMode 
   | SelectMode (Pos,Pos) SelectAction
-  | StatusMode
+  | StatusMode String
   | EditMode Id Box EditStr EditState
 
 data SelectAction = SNewNote

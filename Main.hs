@@ -12,8 +12,8 @@ import Graphics.Vty hiding ( Mode, setMode )
 import Graphics.Vty.Picture
 import Graphics.Vty.Image ( emptyImage, charFill )
 import qualified Graphics.Vty.Image as I
-import Graphics.Vty.Attributes ( defAttr, withBackColor )
-import Graphics.Vty.Attributes.Color ( blue, green, rgbColor )
+import Graphics.Vty.Attributes ( defAttr, withBackColor, withForeColor, withStyle, bold )
+import Graphics.Vty.Attributes.Color 
 
 import System.Environment(getArgs)
 import System.Directory
@@ -99,7 +99,16 @@ handleEventMode BaseMode (EvKey (KChar c) []) | c `elem` "HJKL" =
         >>  return False
 
 -- Enter status mode
-handleEventMode BaseMode (EvKey (KChar ':') []) = error "not implemented"
+handleEventMode BaseMode (EvKey (KChar ':') []) = 
+  putMode (StatusMode ":") >> return False
+handleEventMode (StatusMode command) (EvKey (KChar c) []) =
+  putMode (StatusMode (command++[c])) >> return False
+-- Exit status mode by running the command
+handleEventMode (StatusMode command) (EvKey KEnter []) = 
+  runCommand command >> putMode BaseMode >> return False
+-- Exit status mode by discarding the command
+handleEventMode (StatusMode _) (EvKey KEsc []) = 
+  putMode BaseMode >> return False
 
 -- Try to enter edit mode
 handleEventMode BaseMode event | isEnterOrI event = do
@@ -237,6 +246,9 @@ handleInsertModeHelper
      else return ()
   return False
 
+runCommand :: String -> Sack ()
+runCommand _ = return ()
+
 -- Here is the idea:
 --   Check to see of the cursor in not actually on the screen.
 --   If it isn't, slide the view such that the cursor is on the edge of the screen.
@@ -283,6 +295,7 @@ drawSack :: Sack ()
 drawSack = do
   vty <- askVty
   (x,y) <- getCursor
+  (wx,wy) <- windowSize <$> get
   loc@(locL,locU) <- getViewLoc
   mode <- getMode
   let cursorObj = AbsoluteCursor (x-locL) (y-locU)
@@ -290,11 +303,20 @@ drawSack = do
     case mode of
       (SelectMode (xx,yy) _)     -> return $ imageBox blue $ 
                                       shiftBox loc $ (toBox (x,y) (xx,yy))
-      (EditMode _ box editStr _) -> toImageLinesSack box (E.toLines editStr)
+      (EditMode _ box editStr _) -> toHighlightImage box (E.toLines editStr)
       _                          -> return emptyImage
+  let boldAttr = withStyle defAttr bold
+      statusImageNoShift =
+        case mode of
+          (SelectMode _ _)   -> I.string boldAttr "-- Select --"
+          (EditMode _ _ _ _) -> I.string boldAttr "-- Edit --"
+          BaseMode           -> I.string boldAttr "-- Base --"
+          (StatusMode str)   -> I.string defAttr str
+      statusImage = translate 0 (wy-1) statusImageNoShift
+      
   noteImages <- (map snd . notesInView) <$> get
   
-  let allImages = modeImage:noteImages
+  let allImages = statusImage:modeImage:noteImages
       picture = (picForLayers allImages){ 
         picCursor = cursorObj, 
         picBackground = Background ' ' defAttr }
@@ -339,6 +361,33 @@ toImage' loc viewId box textImg = do
             numN = length neighbors
             img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
         return img 
+
+toHighlightImage :: Box -> [String] -> Sack Image
+toHighlightImage box lines = 
+  let width     = boxWidth box - 2
+      height    = boxHeight box - 2
+      selectAttr = defAttr `withBackColor` brightWhite 
+      wrongAttr  = defAttr `withBackColor` red         
+      lImg = I.vertCat $ map (I.char selectAttr) (replicate height ' ')
+      rImg = I.vertCat $ map toImgIt items
+        where isTooLong xs = length xs > width
+              toImgIt (True,c)  = I.char wrongAttr c
+              toImgIt (False,c) = I.char selectAttr c
+              linesMod = lines ++ repeat ""
+              items = zip (map isTooLong linesMod) (replicate height ' ')
+
+      img = (I.vertCat $ map (I.string defAttr) lines) |> 
+                    I.resize (boxWidth box - 2) (boxHeight box - 2)      
+      tImg = I.string selectAttr $ replicate (width+2) ' '
+      bImg = let attr = if length lines > height
+                          then wrongAttr
+                          else selectAttr
+             in I.string selectAttr $ replicate (width+2) ' '
+      imgNoShift = I.vertCat [tImg, I.horizCat [lImg, img, rImg], bImg]
+   in do loc <- getViewLoc
+         let (Box il ir iu id) = shiftBox loc box
+         return $ translate il iu imgNoShift
+
 
 shiftBox :: (Pos,Pos) -> Box -> Box
 shiftBox (locL,locU) (Box l r u d) = Box (l-locL) (r-locL) (u-locU) (d-locU)
@@ -409,5 +458,5 @@ boxWidth  (Box l r _ _) = r - l + 1
 boxHeight  :: Box -> Int
 boxHeight (Box _ _ u d) = d - u + 1
 
-isEnterOrI event = event == (EvKey KEnter []) || event == (EvKey (KChar 'i') []) 
-
+isEnterOrI event = event   == (EvKey KEnter []) || event == (EvKey (KChar 'i') []) 
+isEnterOrEsc event = event == (EvKey KEnter []) || event == (EvKey KEsc [])
