@@ -47,14 +47,24 @@ insert (E items) (x,y) c = ((x+1,y), E newItems)
         newItems = lhs >< (newLine <| (Seq.drop 1 rhs)) 
 
 delete :: EditStr -> (Int, Int) -> ((Int, Int), EditStr)
-delete (E items) (x,y) = (newCursor, E newItems)
+delete (E items) (x,y) = ((x,y), E newItems)
   where (lhs, rhs) = Seq.splitAt y $ fixItems y items
         line = Seq.index rhs 0
-        (newCursor, newLine) = 
+        rest = Seq.drop 1 rhs
+        newItems = 
           if x == Seq.length line
-            then ((x-1,y), line)
-            else ((x,y), Seq.deleteAt x line)
-        newItems = lhs >< (newLine <| (Seq.drop 1 rhs))
+             then let (restLine,rest') = 
+                        if Seq.length rest == 0
+                           then (Seq.empty, Seq.empty)
+                           else (Seq.index rest 0, Seq.drop 1 rest)
+                   in (lhs |> (line >< restLine)) >< rest'
+             else let newLine = Seq.deleteAt x line
+                   in lhs >< (newLine <| rest)
+--        (newCursor, newLine) = 
+--          if x == Seq.length line
+--            then ((x-1,y), line)
+--            else ((x,y), Seq.deleteAt x line)
+--        newItems = lhs >< (newLine <| (Seq.drop 1 rhs))
 
 backspace :: EditStr -> (Int, Int) -> ((Int, Int), EditStr)
 backspace e (0,0) = ((0,0), e)
