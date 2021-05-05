@@ -24,7 +24,7 @@ import Notesack.Misc
 import Notesack.Boundary
 import Notesack.EditStr ( EditStr )
 import qualified Notesack.EditStr as E
-import Data.Char ( toLower, isDigit )
+import Data.Char ( toLower )
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -71,6 +71,7 @@ getInitState viewId = do
         tvCursor
         initWindowSize
         initNotesInView
+        ""
   return initState
 
 sackInteract :: Bool -> Sack ()
@@ -85,9 +86,6 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
   where handleEvent event = getMode >>= (flip handleEventMode event)
 
 handleEventMode :: Mode -> Event -> Sack Bool
-
--- This should use a status bar instead TODO
-handleEventMode mode (EvKey KEsc []) | baseOrPlace mode = shutdownSack >> return True
 
 -- Just move the cursor
 handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "hjkl" = 
@@ -111,6 +109,8 @@ handleEventMode (StatusMode command) (EvKey (KChar c) []) =
 -- Exit status mode by running the command
 handleEventMode (StatusMode command) (EvKey KEnter []) = 
   runCommand command
+handleEventMode (StatusMode command) (EvKey KBS []) =
+  putMode (StatusMode (init command)) >> return False
 -- Exit status mode by discarding the command
 handleEventMode (StatusMode _) (EvKey KEsc []) = 
   putMode BaseMode >> return False
@@ -277,6 +277,10 @@ data Command =
   | CommandClose
   | CommandQuit
   | CommandView String
+  | CommandWhich 
+  | CommandToday
+  | CommandPrevDay
+  | CommandNextDay
   | NoCommand
 -- TODO: switch view, yo
 
@@ -288,6 +292,10 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("v":tag:[])    = CommandView tag
         recurse ("close":[])    = CommandClose
         recurse ("c":[])        = CommandClose
+        recurse ("which":[])    = CommandWhich
+        recurse ("today":[])    = CommandToday
+        recurse ("viewl":[])    = CommandPrevDay
+        recurse ("viewr":[])    = CommandNextDay
         recurse ("quit":[])     = CommandQuit  
         recurse ("q":[])        = CommandQuit
         recurse _               = NoCommand
@@ -299,6 +307,10 @@ runCommand commandStr = do
     CommandTag  tag -> tagSelected tag >> putMode BaseMode
     CommandView tag -> switchView tag
     CommandClose    -> closeSelected
+    CommandToday    -> liftIO getDate >>= switchView
+    CommandWhich    -> getViewId >>= putStatusError >> putMode BaseMode
+    CommandPrevDay  -> switchViewPrevDay
+    CommandNextDay  -> switchViewNextDay
     CommandQuit     -> shutdownSack
     NoCommand       -> setStatusError "Invalid command" >> putMode BaseMode
   case command of
@@ -310,6 +322,26 @@ switchView newViewId = do
   saveViewInfo
   newState <- lift $ getInitState newViewId
   put newState
+
+switchViewNextDay :: Sack ()
+switchViewNextDay = do
+  viewId <- getViewId
+  if isDateLike viewId
+     then do nextTag <- lift $ getNextDay viewId
+             case nextTag of
+               (Just tag) -> switchView tag
+               Nothing    -> putStatusError "no next day" >> putMode BaseMode
+     else                    putStatusError "no next day" >> putMode BaseMode
+
+switchViewPrevDay :: Sack ()
+switchViewPrevDay = do
+  viewId <- getViewId
+  if isDateLike viewId
+     then do prevTag <- lift $ getPrevDay viewId
+             case prevTag of
+               (Just tag) -> switchView tag
+               Nothing    -> putStatusError "no prev day" >> putMode BaseMode
+     else                    putStatusError "no prev day" >> putMode BaseMode
 
 tagSelected :: String -> Sack ()
 tagSelected tag = 
@@ -324,7 +356,7 @@ tagSelected tag =
                       loadView tag
                       -- add to the tvn, but with a null box
                       addTvn (TableViewNote tag noteId nullBox)
-   in if length tag == 8 && all isDigit tag
+   in if isDateLike tag 
          then setStatusError "Invalid tag. Reason: the tag is date like."
          else getSelected >>= f
 
@@ -349,17 +381,6 @@ closeSelected =
                state <- get
                put $ state { mode = PlaceMode unplacedNotes,
                              notesInView = newNotesInView }
-
---               -- remove noteId from notes in view, and
---               -- update the images of it's neighbors
---               state <- get 
---               let oldNotesInView = notesInView state
---                   newNotesInView = filter notNote oldNotesInView
---                     where notNote (x,_) = x /= noteId
---               -- and enter place mode 
---               put $ state { 
---                        notesInView = newNotesInView,
---                        mode = PlaceMode [noteId] }
    in do viewId <- getViewId
          getSelected >>= f viewId
 
@@ -373,9 +394,8 @@ getSelected = do
              [(x,_,_)] -> Just x
              _         -> Nothing
 
--- TODO: add to the state a status error, and display it
 setStatusError :: String -> Sack ()
-setStatusError _ = return ()
+setStatusError serr = putStatusError serr
 
 -- Here is the idea:
 --   Check to see of the cursor in not actually on the screen.
@@ -433,14 +453,18 @@ drawSack = do
                                       shiftBox loc $ (toBox (x,y) (xx,yy))
       (EditMode _ box editStr _) -> toHighlightImage box (E.toLines editStr)
       _                          -> return emptyImage
+  serr <- getStatusError
+  -- clear the status error now
+  putStatusError ""
   let boldAttr = withStyle defAttr bold
       statusImageNoShift =
-        case mode of
-          (SelectMode _ _)   -> I.string boldAttr "-- Select --"
-          (EditMode _ _ _ _) -> I.string boldAttr "-- Edit --"
-          BaseMode           -> I.string boldAttr "-- Base --"
-          (PlaceMode _)      -> I.string boldAttr "-- Place --"
-          (StatusMode str)   -> I.string defAttr str
+        case (serr, mode) of
+          ("", (SelectMode _ _)  ) -> I.string boldAttr "-- Select --"
+          ("", (EditMode _ _ _ _)) -> I.string boldAttr "-- Edit --"
+          ("", BaseMode          ) -> I.string boldAttr "-- Base --"
+          ("", (PlaceMode _)     ) -> I.string boldAttr "-- Place --"
+          ("", (StatusMode str)  ) -> I.string defAttr str
+          (serr, _               ) -> I.string defAttr serr
       statusImage = translate 0 (wy-1) statusImageNoShift
       
   noteImages <- (map snd . notesInView) <$> get

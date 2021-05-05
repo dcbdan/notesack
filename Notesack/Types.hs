@@ -4,6 +4,7 @@ module Notesack.Types (
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..),Pos,Id,Box(..),
   askVty, askSackConfig, getViewId, getViewLoc, getMode, putMode, 
+  getStatusError, putStatusError,
   getCursor, putCursor, putMoveCursor, moveLoc, nullBox,
   throwErrorIf
 ) where
@@ -77,7 +78,8 @@ data State = State {
   mode :: Mode,
   cursor :: (Pos,Pos),           
   windowSize :: (Int,Int),
-  notesInView :: [(Id, Image)]
+  notesInView :: [(Id, Image)],
+  statusError :: String
 }
 
 -- We define the tables
@@ -133,6 +135,14 @@ putMoveCursor :: Dir -> Sack ()
 putMoveCursor direction = do
   state <- get
   put state{ cursor = moveLoc direction (cursor state) }
+
+putStatusError :: String -> Sack ()
+putStatusError serr = do
+  state <- get
+  put state{ statusError = serr }
+
+getStatusError :: Sack String
+getStatusError = statusError <$> get
 
 moveLoc :: Dir -> (Pos,Pos) -> (Pos,Pos)
 moveLoc DirL (x,y) = (x-1,y)

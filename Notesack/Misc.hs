@@ -1,7 +1,8 @@
-module Notesack.Misc ( getDate, (.>), (|>) ) where
+module Notesack.Misc ( getDate, isDateLike, (.>), (|>) ) where
 
 import Data.Time.Clock
 import Data.Time.Calendar
+import Data.Char ( isDigit )
 
 getDate :: IO String
 getDate = do 
@@ -11,6 +12,9 @@ getDate = do
                      in if length s == 1
                            then '0':s
                            else s
+
+isDateLike :: String -> Bool
+isDateLike tag = length tag == 8 && all isDigit tag
 
 (.>) = flip (.)
 (|>) = flip ($)

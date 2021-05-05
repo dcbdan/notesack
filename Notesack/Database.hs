@@ -5,7 +5,8 @@ module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
   hasView, lookupView, addTv, addTvn, addTn, saveView,
   areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
-  getNeighbors, updateNote, updateTvn
+  getNeighbors, updateNote, updateTvn,
+  getNextDay, getPrevDay
 ) where
 
 import Foreign.Ptr
@@ -163,6 +164,32 @@ updateNote noteId text =
           "SET Text = \"%w\",",
           "    DateChanged = "++show today,
           "WHERE NoteId = "++show noteId++";"]
+
+getNextDay :: String -> ExceptM (Maybe String)
+getNextDay date = 
+  let sqlStr = unlines $ [
+        "SELECT ViewId FROM View",
+        "WHERE ViewId > \"%w\"",
+        "ORDER BY ViewId DESC"]
+      fixRow [x] = fromObjText x
+   in do table <- filter isDateLike . map fixRow 
+                    <$> getTable "getNextDay" (SqlQuery sqlStr [date]) [SqlText] 
+         case table of
+           []    -> return Nothing
+           (x:_) -> return $ Just x
+
+getPrevDay :: String -> ExceptM (Maybe String)
+getPrevDay date = 
+  let sqlStr = unlines $ [
+        "SELECT ViewId FROM View",
+        "WHERE ViewId < \"%w\"",
+        "ORDER BY ViewId ASC"]
+      fixRow [x] = fromObjText x
+   in do table <- filter isDateLike . map fixRow 
+                    <$> getTable "getPrevDay" (SqlQuery sqlStr [date]) [SqlText] 
+         case table of
+           []    -> return Nothing
+           (x:_) -> return $ Just x
 
 data SqlQuery = SqlQuery String [String]
 data SqlType = SqlInt | SqlText
