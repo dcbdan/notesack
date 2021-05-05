@@ -331,7 +331,7 @@ switchViewNextDay = do
              case nextTag of
                (Just tag) -> switchView tag
                Nothing    -> putStatusError "no next day" >> putMode BaseMode
-     else                    putStatusError "no next day" >> putMode BaseMode
+     else putStatusError "The current tag is not a date" >> putMode BaseMode
 
 switchViewPrevDay :: Sack ()
 switchViewPrevDay = do
@@ -341,7 +341,7 @@ switchViewPrevDay = do
              case prevTag of
                (Just tag) -> switchView tag
                Nothing    -> putStatusError "no prev day" >> putMode BaseMode
-     else                    putStatusError "no prev day" >> putMode BaseMode
+     else putStatusError "The current tag is not a date" >> putMode BaseMode
 
 tagSelected :: String -> Sack ()
 tagSelected tag = 
@@ -444,6 +444,7 @@ drawSack = do
   vty <- askVty
   (x,y) <- getCursor
   (wx,wy) <- windowSize <$> get
+  viewId <- getViewId
   loc@(locL,locU) <- getViewLoc
   mode <- getMode
   let cursorObj = AbsoluteCursor (x-locL) (y-locU)
@@ -466,10 +467,10 @@ drawSack = do
           ("", (StatusMode str)  ) -> I.string defAttr str
           (serr, _               ) -> I.string defAttr serr
       statusImage = translate 0 (wy-1) statusImageNoShift
-      
+      tagImage = translate 0 (wy-2) $ I.string defAttr $ "Tag: " ++ viewId      
   noteImages <- (map snd . notesInView) <$> get
   
-  let allImages = statusImage:modeImage:noteImages
+  let allImages = statusImage:tagImage:modeImage:noteImages
       picture = (picForLayers allImages){ 
         picCursor = cursorObj, 
         picBackground = Background ' ' defAttr }
@@ -564,6 +565,12 @@ addNewNoteToView box = do
   state <- get
   img <- lift $ toImageText viewLoc viewId box ""
   put state { notesInView = (noteId, img):(notesInView state) }
+
+  -- we always add notes to the today view
+  if today /= viewId
+     then lift $ addTvn $ TableViewNote today noteId nullBox
+     else return ()
+
 
 placeNoteToView :: Id -> Box -> Sack ()
 placeNoteToView noteId box = do
