@@ -281,6 +281,7 @@ data Command =
   | CommandToday
   | CommandPrevDay
   | CommandNextDay
+  | CommandArchive
   | NoCommand
 -- TODO: switch view, yo
 
@@ -296,6 +297,7 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("today":[])    = CommandToday
         recurse ("viewl":[])    = CommandPrevDay
         recurse ("viewr":[])    = CommandNextDay
+        recurse ("archive":[])  = CommandArchive
         recurse ("quit":[])     = CommandQuit  
         recurse ("q":[])        = CommandQuit
         recurse _               = NoCommand
@@ -311,6 +313,7 @@ runCommand commandStr = do
     CommandWhich    -> getViewId >>= putStatusError >> putMode BaseMode
     CommandPrevDay  -> switchViewPrevDay
     CommandNextDay  -> switchViewNextDay
+    CommandArchive  -> archiveSelected >> putMode BaseMode
     CommandQuit     -> shutdownSack
     NoCommand       -> setStatusError "Invalid command" >> putMode BaseMode
   case command of
@@ -374,13 +377,22 @@ closeSelected =
                -- Option 1: remove the note and update its neighbors
                -- Option 2: just reinit
                -- Option 2.
-               loc <- getViewLoc
-               wSize <- windowSize <$> get
-               newNotesInView <- lift $ getInitNotes viewId loc wSize
-               unplacedNotes <- lift $ getUnplacedNotes viewId 
-               state <- get
-               put $ state { mode = PlaceMode unplacedNotes,
-                             notesInView = newNotesInView }
+               saveViewInfo
+               lift (getInitState viewId) >>= put
+   in do viewId <- getViewId
+         getSelected >>= f viewId
+
+archiveSelected :: Sack ()
+archiveSelected = 
+  let f :: String -> Maybe Id -> Sack ()
+      f viewId Nothing = return ()
+      f viewId (Just noteId) = 
+         do -- 0) get the tags of this note
+            -- 1) remove all of the relevant entries in TableViewNote
+            lift $ tvnRemove viewId noteId
+            -- 2) reinit
+            saveViewInfo
+            lift (getInitState viewId) >>= put
    in do viewId <- getViewId
          getSelected >>= f viewId
 
@@ -476,6 +488,8 @@ drawSack = do
         picBackground = Background ' ' defAttr }
   liftIO $ update vty picture 
 
+-- TODO: getInitNotes should just get all notes!!!!!!
+--       also notesInView is a misnomer, its just all the notes..
 getInitNotes viewId (x,y) (nx, ny) = do
   notesInfo <- getNotesInArea viewId (Box x (x+nx-1) y (y+ny-1))
   let fix (noteId, box@(Box l r u d), text) = do

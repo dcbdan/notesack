@@ -6,7 +6,7 @@ module Notesack.Database (
   hasView, lookupView, addTv, addTvn, addTn, saveView,
   areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
   getNeighbors, updateNote, updateTvn,
-  getNextDay, getPrevDay
+  getNextDay, getPrevDay, tvnRemove
 ) where
 
 import Foreign.Ptr
@@ -190,6 +190,15 @@ getPrevDay date =
          case table of
            []    -> return Nothing
            (x:_) -> return $ Just x
+
+tvnRemove :: String -> Id -> ExceptM ()
+tvnRemove viewId noteId = 
+  let sqlStr = unlines $ [
+        "DELETE FROM ViewNote",
+        "WHERE ViewId = \"%w\"",
+        "  AND NoteId = "++show noteId++";"]
+   in exec "tvnRemove" $ SqlQuery sqlStr [viewId]
+   
 
 data SqlQuery = SqlQuery String [String]
 data SqlType = SqlInt | SqlText
