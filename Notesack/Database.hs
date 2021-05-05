@@ -170,7 +170,7 @@ getNextDay date =
   let sqlStr = unlines $ [
         "SELECT ViewId FROM View",
         "WHERE ViewId > \"%w\"",
-        "ORDER BY ViewId DESC"]
+        "ORDER BY ViewId ASC"]
       fixRow [x] = fromObjText x
    in do table <- filter isDateLike . map fixRow 
                     <$> getTable "getNextDay" (SqlQuery sqlStr [date]) [SqlText] 
@@ -183,7 +183,7 @@ getPrevDay date =
   let sqlStr = unlines $ [
         "SELECT ViewId FROM View",
         "WHERE ViewId < \"%w\"",
-        "ORDER BY ViewId ASC"]
+        "ORDER BY ViewId DESC"]
       fixRow [x] = fromObjText x
    in do table <- filter isDateLike . map fixRow 
                     <$> getTable "getPrevDay" (SqlQuery sqlStr [date]) [SqlText] 
