@@ -6,7 +6,7 @@ module Notesack.Database (
   hasView, lookupView, addTv, addTvn, addTn, saveView,
   areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
   getNeighbors, updateNote, updateTvn,
-  getNextDay, getPrevDay, tvnRemove
+  getNextDay, getPrevDay, tvnRemove, listTags, listSelectedTags
 ) where
 
 import Foreign.Ptr
@@ -198,7 +198,26 @@ tvnRemove viewId noteId =
         "WHERE ViewId = \"%w\"",
         "  AND NoteId = "++show noteId++";"]
    in exec "tvnRemove" $ SqlQuery sqlStr [viewId]
-   
+
+-- Get all tags except the date tags
+listTags :: ExceptM [String]
+listTags = 
+  let sqlStr = unlines $ [
+        "SELECT DISTINCT ViewNote.ViewId",
+        "FROM ViewNote JOIN Note",
+        "WHERE ViewNote.NoteId = Note.NoteId",
+        "ORDER BY Note.DateChanged DESC;"]
+      fixRow [x] = fromObjText x
+   in filter (not . isDateLike) . map fixRow 
+        <$> getTable "listTags" (SqlQuery sqlStr []) [SqlText]
+
+listSelectedTags :: Id -> ExceptM [String]
+listSelectedTags id =
+  let sqlStr = "SELECT DISTINCT ViewId FROM ViewNote WHERE NoteId = "++show id++";"
+      fixRow [x] = fromObjText x
+   in filter (not . isDateLike) . map fixRow
+        <$> getTable "listSelectedTags" (SqlQuery sqlStr []) [SqlText]
+     
 
 data SqlQuery = SqlQuery String [String]
 data SqlType = SqlInt | SqlText

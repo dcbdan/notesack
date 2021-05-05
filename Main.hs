@@ -283,7 +283,6 @@ data Command =
   | CommandNextDay
   | CommandArchive
   | NoCommand
--- TODO: switch view, yo
 
 parseCommand :: String -> Command
 parseCommand (':':xs) = recurse $ words xs
@@ -298,6 +297,7 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("viewl":[])    = CommandPrevDay
         recurse ("viewr":[])    = CommandNextDay
         recurse ("archive":[])  = CommandArchive
+        recurse ("a":[])        = CommandArchive
         recurse ("quit":[])     = CommandQuit  
         recurse ("q":[])        = CommandQuit
         recurse _               = NoCommand
@@ -315,7 +315,7 @@ runCommand commandStr = do
     CommandNextDay  -> switchViewNextDay
     CommandArchive  -> archiveSelected >> putMode BaseMode
     CommandQuit     -> shutdownSack
-    NoCommand       -> setStatusError "Invalid command" >> putMode BaseMode
+    NoCommand       -> setStatusError "invalid command" >> putMode BaseMode
   case command of
     CommandQuit -> return True
     _           -> return False
@@ -388,6 +388,7 @@ archiveSelected =
       f viewId Nothing = return ()
       f viewId (Just noteId) = 
          do -- 0) get the tags of this note
+            -- TODO: remove any empty views
             -- 1) remove all of the relevant entries in TableViewNote
             lift $ tvnRemove viewId noteId
             -- 2) reinit
@@ -395,6 +396,14 @@ archiveSelected =
             lift (getInitState viewId) >>= put
    in do viewId <- getViewId
          getSelected >>= f viewId
+
+getSelectedTags :: Sack [String]
+getSelectedTags = do
+  s <- getSelected
+  case s of 
+    Nothing -> return []
+    (Just id) -> lift $ listSelectedTags id
+    
 
 getSelected :: Sack (Maybe Id)
 getSelected = do
@@ -481,8 +490,16 @@ drawSack = do
       statusImage = translate 0 (wy-1) statusImageNoShift
       tagImage = translate 0 (wy-2) $ I.string defAttr $ "Tag: " ++ viewId      
   noteImages <- (map snd . notesInView) <$> get
-  
-  let allImages = statusImage:tagImage:modeImage:noteImages
+ 
+  allTags <- lift $ listTags 
+  tagsOfSelected <- getSelectedTags
+  let toRowTagAttr = defAttr `withForeColor` rgbColor 0 0 255 `withBackColor` rgbColor 220 220 220
+      toRowTag t = if t `elem` tagsOfSelected
+                     then I.string (toRowTagAttr `withStyle` bold) t
+                     else I.string toRowTagAttr t
+  let barImage = I.vertCat (map toRowTag allTags)
+
+  let allImages = statusImage:tagImage:barImage:modeImage:noteImages
       picture = (picForLayers allImages){ 
         picCursor = cursorObj, 
         picBackground = Background ' ' defAttr }
