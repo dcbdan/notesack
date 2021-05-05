@@ -6,7 +6,8 @@ module Notesack.Database (
   hasView, lookupView, addTv, addTvn, addTn, saveView,
   areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
   getNeighbors, updateNote, updateTvn,
-  getNextDay, getPrevDay, tvnRemove, listTags, listSelectedTags
+  getNextDay, getPrevDay, tvnRemove, tvnRemoveNote, 
+  listTags, listSelectedTags
 ) where
 
 import Foreign.Ptr
@@ -198,6 +199,13 @@ tvnRemove viewId noteId =
         "WHERE ViewId = \"%w\"",
         "  AND NoteId = "++show noteId++";"]
    in exec "tvnRemove" $ SqlQuery sqlStr [viewId]
+
+tvnRemoveNote :: Id -> ExceptM ()
+tvnRemoveNote noteId = 
+  let sqlStr = unlines $ [
+        "DELETE FROM ViewNote",
+        "WHERE NoteId = "++show noteId++";"]
+   in exec "tvnRemoveNote" $ SqlQuery sqlStr []
 
 -- Get all tags except the date tags
 listTags :: ExceptM [String]

@@ -390,7 +390,7 @@ archiveSelected =
          do -- 0) get the tags of this note
             -- TODO: remove any empty views
             -- 1) remove all of the relevant entries in TableViewNote
-            lift $ tvnRemove viewId noteId
+            lift $ tvnRemoveNote noteId
             -- 2) reinit
             saveViewInfo
             lift (getInitState viewId) >>= put
@@ -551,7 +551,7 @@ toHighlightImage :: Box -> [String] -> Sack Image
 toHighlightImage box lines = 
   let width     = boxWidth box - 2
       height    = boxHeight box - 2
-      selectAttr = defAttr `withBackColor` brightWhite 
+      selectAttr = defAttr `withBackColor` rgbColor 102 102 255-- 255 255 180-- brightWhite 
       wrongAttr  = defAttr `withBackColor` red         
       lImg = I.vertCat $ map (I.char selectAttr) (replicate height ' ')
       rImg = I.vertCat $ map toImgIt items
