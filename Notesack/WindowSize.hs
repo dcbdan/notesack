@@ -7,6 +7,7 @@ import System.Posix.IO (fdRead, stdInput)
 import Control.Exception (finally, catch, IOException)
 
 import System.IO ( hPutChar, hPutStr, hFlush, stdout )
+import System.Process ( readProcess )
 
 import Control.Monad
 
@@ -45,24 +46,31 @@ withRawInput vmin vtime application = do
   application 
     `finally` setTerminalAttributes stdInput oldTermSettings Immediately
 
--- TODO: Bug: sometimes read fails. (This happened when a lot of getWindowSize was being called)
-getWindowSize ::IO (Int, Int)
+getWindowSize :: IO (Int, Int)
 getWindowSize = do
-  hPut saveCursor
-  hPut $ moveCursor 1000 3000
-  hPut (esc:"[6n")
-  hPut restoreCursor
-  hFlu
-  -- Need atleast 6 bytes (for your 1 x 1 terminals..)
-  -- Wait at most 0.1 seconds for the input
-  -- read up to 20 bytes (for your 10,000 x 10,000 terminals..)
-  w <- withRawInput 6 1 $ do
-    (str, bytes) <- fdRead stdInput 20
-    return (show str)
-  -- parse "\ESC[49;87R" into 49, 87
-  let (numY, strX) = span (/= ';') $ drop 1 $ dropWhile (/= '[') w
-      numX = takeWhile (/= 'R') $ drop 1 strX
-  return (read numX, read numY)
+  -- readProcess for tput returns <num>\n so remove that before converting to a number
+  numX <- (read . init) <$> readProcess "tput" ["cols"] ""
+  numY <- (read . init) <$> readProcess "tput" ["lines"] ""
+  return (numX, numY)
+
+-- -- TODO: Bug: sometimes read fails. (This happened when a lot of getWindowSize was being called)
+-- getWindowSize ::IO (Int, Int)
+-- getWindowSize = do
+--   hPut saveCursor
+--   hPut $ moveCursor 1000 3000
+--   hPut (esc:"[6n")
+--   hPut restoreCursor
+--   hFlu
+--   -- Need atleast 6 bytes (for your 1 x 1 terminals..)
+--   -- Wait at most 0.1 seconds for the input
+--   -- read up to 20 bytes (for your 10,000 x 10,000 terminals..)
+--   w <- withRawInput 6 1 $ do
+--     (str, bytes) <- fdRead stdInput 20
+--     return (show str)
+--   -- parse "\ESC[49;87R" into 49, 87
+--   let (numY, strX) = span (/= ';') $ drop 1 $ dropWhile (/= '[') w
+--       numX = takeWhile (/= 'R') $ drop 1 strX
+--   return (read numX, read numY)
 
 esc = '\x1b'
 saveCursor = esc:"7"
