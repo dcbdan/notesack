@@ -493,7 +493,7 @@ drawSack = do
  
   allTags <- lift $ listTags 
   tagsOfSelected <- getSelectedTags
-  let toRowTagAttr = defAttr `withForeColor` rgbColor 0 0 255 `withBackColor` rgbColor 220 220 220
+  let toRowTagAttr = defAttr `withForeColor` rgbColor 0 0 255 `withBackColor` rgbColor 235 235 235
       toRowTag t = if t `elem` tagsOfSelected
                      then I.string (toRowTagAttr `withStyle` bold) t
                      else I.string toRowTagAttr t
