@@ -274,6 +274,7 @@ saveViewInfo = do
 
 data Command = 
     CommandTag String
+  | CommandUntag (Maybe String)
   | CommandClose
   | CommandQuit
   | CommandView String
@@ -286,36 +287,39 @@ data Command =
 
 parseCommand :: String -> Command
 parseCommand (':':xs) = recurse $ words xs
-  where recurse ("tag":tag:[])  = CommandTag tag
-        recurse ("t":tag:[])    = CommandTag tag
-        recurse ("view":tag:[]) = CommandView tag
-        recurse ("v":tag:[])    = CommandView tag
-        recurse ("close":[])    = CommandClose
-        recurse ("c":[])        = CommandClose
-        recurse ("which":[])    = CommandWhich
-        recurse ("today":[])    = CommandToday
-        recurse ("viewl":[])    = CommandPrevDay
-        recurse ("viewr":[])    = CommandNextDay
-        recurse ("archive":[])  = CommandArchive
-        recurse ("a":[])        = CommandArchive
-        recurse ("quit":[])     = CommandQuit  
-        recurse ("q":[])        = CommandQuit
-        recurse _               = NoCommand
+  where recurse ("tag":tag:[])   = CommandTag tag
+        recurse ("t":tag:[])     = CommandTag tag
+        recurse ("untag":tag:[]) = CommandUntag (Just tag)
+        recurse ("untag":[])     = CommandUntag Nothing
+        recurse ("view":tag:[])  = CommandView tag
+        recurse ("v":tag:[])     = CommandView tag
+        recurse ("close":[])     = CommandClose
+        recurse ("c":[])         = CommandClose
+        recurse ("which":[])     = CommandWhich
+        recurse ("today":[])     = CommandToday
+        recurse ("viewl":[])     = CommandPrevDay
+        recurse ("viewr":[])     = CommandNextDay
+        recurse ("archive":[])   = CommandArchive
+        recurse ("a":[])         = CommandArchive
+        recurse ("quit":[])      = CommandQuit  
+        recurse ("q":[])         = CommandQuit
+        recurse _                = NoCommand
 
 runCommand :: String -> Sack Bool
 runCommand commandStr = do
   let command = parseCommand commandStr
   case command of
-    CommandTag  tag -> tagSelected tag >> putMode BaseMode
-    CommandView tag -> switchView tag
-    CommandClose    -> closeSelected
-    CommandToday    -> liftIO getDate >>= switchView
-    CommandWhich    -> getViewId >>= putStatusError >> putMode BaseMode
-    CommandPrevDay  -> switchViewPrevDay
-    CommandNextDay  -> switchViewNextDay
-    CommandArchive  -> archiveSelected >> putMode BaseMode
-    CommandQuit     -> shutdownSack
-    NoCommand       -> setStatusError "invalid command" >> putMode BaseMode
+    CommandTag   tag -> tagSelected   tag >> putMode BaseMode
+    CommandUntag tag -> untagSelected tag >> putMode BaseMode
+    CommandView  tag -> switchView tag
+    CommandClose     -> closeSelected
+    CommandToday     -> liftIO getDate >>= switchView
+    CommandWhich     -> getViewId >>= putStatusError >> putMode BaseMode
+    CommandPrevDay   -> switchViewPrevDay
+    CommandNextDay   -> switchViewNextDay
+    CommandArchive   -> archiveSelected >> putMode BaseMode
+    CommandQuit      -> shutdownSack
+    NoCommand        -> setStatusError "invalid command" >> putMode BaseMode
   case command of
     CommandQuit -> return True
     _           -> return False
@@ -362,6 +366,27 @@ tagSelected tag =
    in if isDateLike tag 
          then setStatusError "Invalid tag. Reason: the tag is date like."
          else getSelected >>= f
+
+untagSelected :: Maybe String -> Sack ()
+untagSelected maybeTagToRemove = 
+  let f _ Nothing = return ()
+      f tagToRemove (Just noteId) = do
+        viewId <- getViewId
+        -- remove the tag from the note
+        lift $ tvnRemove tagToRemove noteId
+        -- if we just untagged a note from the current view, reset the screen
+        if tagToRemove == viewId
+           then do saveViewInfo
+                   lift (getInitState viewId) >>= put
+           else return ()
+   in do tagToRemove <- case maybeTagToRemove of
+                          Nothing -> getViewId
+                          Just t  -> return t
+         -- by not removing any notes that are datalike, you can't accidently
+         -- delete a note
+         if isDateLike tagToRemove
+            then setStatusError "Invalid tag. Reason: the tag is date like."
+            else getSelected >>= f tagToRemove
 
 closeSelected :: Sack ()
 closeSelected = 
