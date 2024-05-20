@@ -5,6 +5,7 @@ import Foreign.C.String
 import Foreign.C.Types
 import Foreign.Marshal.Alloc ( free )
 
+import Control.Monad
 import Control.Monad.RWS
 import Control.Monad.Except
 
@@ -13,14 +14,15 @@ import Graphics.Vty.Picture
 import Graphics.Vty.Image ( emptyImage, charFill )
 import qualified Graphics.Vty.Image as I
 import Graphics.Vty.Attributes ( defAttr, withBackColor, withForeColor, withStyle, bold )
-import Graphics.Vty.Attributes.Color 
+import Graphics.Vty.Attributes.Color
+import Graphics.Vty.Platform.Unix ( mkVty )
 
 import System.Environment(getArgs)
 import System.Directory
 
 import Notesack.Types
 import Notesack.Database
-import Notesack.Misc 
+import Notesack.Misc
 import Notesack.Boundary
 import Notesack.EditStr ( EditStr )
 import qualified Notesack.EditStr as E
@@ -45,14 +47,14 @@ mainExcept vty [filename] = do
   let initEnv = Env vty SackConfig
   today <- liftIO getDate
   initState <- getInitState today
-  execRWST (drawSack >> sackInteract False) initEnv initState >> return ()  
-  closeDatabase 
+  execRWST (drawSack >> sackInteract False) initEnv initState >> return ()
+  closeDatabase
 mainExcept _ _ = throwError "Usage: notesack FILE"
 
 getInitState :: String -> ExceptM State
 getInitState viewId = do
   -- create the view if it doesn't already exist
-  loadView viewId 
+  loadView viewId
   -- we need the location of the table view
   -- (it's a bit silly because we may have just
   --  added this row to the View table, but oh well)
@@ -60,14 +62,14 @@ getInitState viewId = do
   initWindowSize <- liftIO getWindowSize
   initNotesInView <- getInitNotes viewId loc initWindowSize
   unplacedNotes <- getUnplacedNotes viewId
-  let initMode = 
+  let initMode =
         if null unplacedNotes
            then BaseMode
            else PlaceMode unplacedNotes
-      initState = State 
-        viewId 
+      initState = State
+        viewId
         loc
-        initMode 
+        initMode
         tvCursor
         initWindowSize
         initNotesInView
@@ -88,31 +90,31 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 handleEventMode :: Mode -> Event -> Sack Bool
 
 -- Just move the cursor
-handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "hjkl" = 
+handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "hjkl" =
   putMoveCursor (dirFromChar c) >> return False
 
 -- Just move the view
 -- (I'd like to use the control modifier, but for some reason, vty
 --  wasn't picking up the ctrl + hkjl combo correctly for all of em)
-handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "HJKL" = 
+handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "HJKL" =
   let dir = dirFromChar (toLower c)
-   in (moveLoc dir <$> getViewLoc) 
-        >>= resetViewLoc 
+   in (moveLoc dir <$> getViewLoc)
+        >>= resetViewLoc
         >>  unlessM cursorOnScreen (putMoveCursor dir)
         >>  return False
 
 -- Enter status mode
-handleEventMode BaseMode (EvKey (KChar ':') []) = 
+handleEventMode BaseMode (EvKey (KChar ':') []) =
   putMode (StatusMode ":") >> return False
 handleEventMode (StatusMode command) (EvKey (KChar c) []) =
   putMode (StatusMode (command++[c])) >> return False
 -- Exit status mode by running the command
-handleEventMode (StatusMode command) (EvKey KEnter []) = 
+handleEventMode (StatusMode command) (EvKey KEnter []) =
   runCommand command
 handleEventMode (StatusMode command) (EvKey KBS []) =
   putMode (StatusMode (init command)) >> return False
 -- Exit status mode by discarding the command
-handleEventMode (StatusMode _) (EvKey KEsc []) = 
+handleEventMode (StatusMode _) (EvKey KEsc []) =
   putMode BaseMode >> return False
 
 -- Try to enter edit mode
@@ -128,19 +130,19 @@ handleEventMode BaseMode event | isEnterOrI event = do
     -- one note, but cursor on boundary
     [(_, box, _)] | onBoundary box cursor -> return ()
     -- one note, cursor in correct region
-    [(noteId, box, text)] -> 
+    [(noteId, box, text)] ->
       do -- 1) remove the note from the cache
          -- 2) update the mode
          state <- get
          let newMode = EditMode noteId box (E.fromText (boxWidth box - 2 ) text) EditInsert
-         put state{ 
+         put state{
            notesInView = filter (fst .> (/= noteId)) (notesInView state),
            mode = newMode }
          handleInsertModeHelper newMode f >> return ()
-           where f editStr cursor = 
+           where f editStr cursor =
                    let newCursor = E.snapCursor editStr cursor
                     in (newCursor, editStr)
-  return False 
+  return False
 
 -- exit edit mode
 handleEventMode (EditMode noteId box editStr EditInsert) (EvKey KEsc []) = do
@@ -154,16 +156,16 @@ handleEventMode (EditMode noteId box editStr EditInsert) (EvKey KEsc []) = do
   return False
 
 -- write c at the cursor location (in edit.insert)
-handleEventMode 
+handleEventMode
   mode@(EditMode _ _ _ EditInsert)
-  (EvKey (KChar c) []) = 
+  (EvKey (KChar c) []) =
     handleInsertModeHelper mode f
       where f editStr cursor = E.insert editStr cursor c
 
 -- Treat enter as a new line character in terms of edit.insert
-handleEventMode 
-  (EditMode a b c EditInsert) 
-  (EvKey KEnter []) = 
+handleEventMode
+  (EditMode a b c EditInsert)
+  (EvKey KEnter []) =
     handleEventMode (EditMode a b c EditInsert) (EvKey (KChar '\n') [])
 
 -- delete in edit.insert mode
@@ -175,8 +177,8 @@ handleEventMode
 
 -- backspace in edit.insert mode
 handleEventMode
-  mode@(EditMode _ _ _ EditInsert) 
-  (EvKey KBS []) = 
+  mode@(EditMode _ _ _ EditInsert)
+  (EvKey KBS []) =
     handleInsertModeHelper mode f
       where f = E.backspace
 
@@ -188,15 +190,15 @@ handleEventMode mode (EvKey (KChar ' ') []) | baseOrPlace mode = do
   cursor@(l,u) <- getCursor
   viewId <- getViewId
   canSelect <- not <$> lift (areaHasNote viewId (Box l l u u))
-  if canSelect 
+  if canSelect
     then putMode (SelectMode cursor sAction)
     else return ()
   return False
 
 -- just leave select mode by escape
-handleEventMode (SelectMode _ SNewNote) (EvKey KEsc []) = 
+handleEventMode (SelectMode _ SNewNote) (EvKey KEsc []) =
   putMode BaseMode >> return False
-handleEventMode (SelectMode _ (SPlace notes)) (EvKey KEsc []) = 
+handleEventMode (SelectMode _ (SPlace notes)) (EvKey KEsc []) =
   putMode (PlaceMode notes) >> return False
 
 --  if we're deselecting, make sure the box is big enough. if so,
@@ -207,7 +209,7 @@ handleEventMode (SelectMode (xx,yy) action) (EvKey (KChar ' ') []) = do
   if r-l < 2 || d-u < 2
      then return ()
      else case action of
-            SNewNote         -> do addNewNoteToView box 
+            SNewNote         -> do addNewNoteToView box
                                    putMode BaseMode
             SPlace [id]      -> do placeNoteToView id box
                                    putMode BaseMode
@@ -218,7 +220,7 @@ handleEventMode (SelectMode (xx,yy) action) (EvKey (KChar ' ') []) = do
 -- movement in select mode;
 -- make sure that expanding in the direction is not going to bump into
 -- another box
-handleEventMode (SelectMode (x,y) action) (EvKey (KChar c) []) | c `elem` "hjkl" = 
+handleEventMode (SelectMode (x,y) action) (EvKey (KChar c) []) | c `elem` "hjkl" =
   let dir = dirFromChar c
       selectRegion (xx,yy) =
         let (Box l r u d) = toBox (x,y) (xx,yy)
@@ -245,9 +247,9 @@ handleEventMode (SelectMode (x,y) action) (EvKey (KChar c) []) | c `elem` "hjkl"
 
 handleEventMode _ _ = return False
 
-handleInsertModeHelper :: 
-  Mode -> 
-  (EditStr -> (Pos,Pos) -> ((Pos,Pos),EditStr)) -> 
+handleInsertModeHelper ::
+  Mode ->
+  (EditStr -> (Pos,Pos) -> ((Pos,Pos),EditStr)) ->
   Sack Bool
 handleInsertModeHelper
   (EditMode a box@(Box l r u d) editStr _)
@@ -266,19 +268,19 @@ shutdownSack :: Sack ()
 shutdownSack = saveViewInfo
 
 saveViewInfo :: Sack ()
-saveViewInfo = do 
-  viewId <- getViewId 
+saveViewInfo = do
+  viewId <- getViewId
   viewLoc <- getViewLoc
   cursorLoc <- getCursor
   lift $ saveView viewId viewLoc cursorLoc
 
-data Command = 
+data Command =
     CommandTag String
   | CommandUntag (Maybe String)
   | CommandClose
   | CommandQuit
   | CommandView String
-  | CommandWhich 
+  | CommandWhich
   | CommandToday
   | CommandPrevDay
   | CommandNextDay
@@ -301,7 +303,7 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("viewr":[])     = CommandNextDay
         recurse ("archive":[])   = CommandArchive
         recurse ("a":[])         = CommandArchive
-        recurse ("quit":[])      = CommandQuit  
+        recurse ("quit":[])      = CommandQuit
         recurse ("q":[])         = CommandQuit
         recurse _                = NoCommand
 
@@ -351,24 +353,22 @@ switchViewPrevDay = do
      else putStatusError "The current tag is not a date" >> putMode BaseMode
 
 tagSelected :: String -> Sack ()
-tagSelected tag = 
+tagSelected tag =
   let f Nothing = return ()
       f (Just noteId) = do
         viewId <- getViewId
         if viewId == tag
-           then -- any noteId that is selected already has the viewId as a tag!          
+           then -- any noteId that is selected already has the viewId as a tag!
                 setStatusError $ "The tag "++viewId++" is already in view!"
-           else lift $ 
+           else lift $
                    do -- create the view if it doesn't already exist
                       loadView tag
                       -- add to the tvn, but with a null box
                       addTvn (TableViewNote tag noteId nullBox)
-   in if isDateLike tag 
-         then setStatusError "Invalid tag. Reason: the tag is date like."
-         else getSelected >>= f
+   in getSelected >>= f
 
 untagSelected :: Maybe String -> Sack ()
-untagSelected maybeTagToRemove = 
+untagSelected maybeTagToRemove =
   let f _ Nothing = return ()
       f tagToRemove (Just noteId) = do
         viewId <- getViewId
@@ -384,19 +384,17 @@ untagSelected maybeTagToRemove =
                           Just t  -> return t
          -- by not removing any notes that are datalike, you can't accidently
          -- delete a note
-         if isDateLike tagToRemove
-            then setStatusError "Invalid tag. Reason: the tag is date like."
-            else getSelected >>= f tagToRemove
+         getSelected >>= f tagToRemove
 
 closeSelected :: Sack ()
-closeSelected = 
+closeSelected =
   let f viewId Nothing = return ()
-      f viewId (Just noteId) =  
+      f viewId (Just noteId) =
         let isStatusMode (StatusMode _) = True
             isStatusMode _ = False
             err = "closeSelected must only be called from status mode"
          in do mode <- getMode
-               throwErrorIf (not (isStatusMode mode)) err 
+               throwErrorIf (not (isStatusMode mode)) err
                -- give noteId a null box in tvn
                lift $ updateTvn viewId noteId nullBox
                -- Option 1: remove the note and update its neighbors
@@ -408,10 +406,10 @@ closeSelected =
          getSelected >>= f viewId
 
 archiveSelected :: Sack ()
-archiveSelected = 
+archiveSelected =
   let f :: String -> Maybe Id -> Sack ()
       f viewId Nothing = return ()
-      f viewId (Just noteId) = 
+      f viewId (Just noteId) =
          do -- 0) get the tags of this note
             -- TODO: remove any empty views
             -- 1) remove all of the relevant entries in TableViewNote
@@ -425,10 +423,10 @@ archiveSelected =
 getSelectedTags :: Sack [String]
 getSelectedTags = do
   s <- getSelected
-  case s of 
+  case s of
     Nothing -> return []
     (Just id) -> lift $ listSelectedTags id
-    
+
 
 getSelected :: Sack (Maybe Id)
 getSelected = do
@@ -496,7 +494,7 @@ drawSack = do
   let cursorObj = AbsoluteCursor (x-locL) (y-locU)
   modeImage <-
     case mode of
-      (SelectMode (xx,yy) _)     -> return $ imageBox blue $ 
+      (SelectMode (xx,yy) _)     -> return $ imageBox blue $
                                       shiftBox loc $ (toBox (x,y) (xx,yy))
       (EditMode _ box editStr _) -> toHighlightImage box (E.toLines editStr)
       _                          -> return emptyImage
@@ -513,10 +511,10 @@ drawSack = do
           ("", (StatusMode str)  ) -> I.string defAttr str
           (serr, _               ) -> I.string defAttr serr
       statusImage = translate 0 (wy-1) statusImageNoShift
-      tagImage = translate 0 (wy-2) $ I.string defAttr $ "Tag: " ++ viewId      
+      tagImage = translate 0 (wy-2) $ I.string defAttr $ "Tag: " ++ viewId
   noteImages <- (map snd . notesInView) <$> get
- 
-  allTags <- lift $ listTags 
+
+  allTags <- lift $ listTags
   tagsOfSelected <- getSelectedTags
   let toRowTagAttr = defAttr `withForeColor` rgbColor 0 0 255 `withBackColor` rgbColor 235 235 235
       toRowTag t = if t `elem` tagsOfSelected
@@ -525,10 +523,10 @@ drawSack = do
   let barImage = I.vertCat (map toRowTag allTags)
 
   let allImages = statusImage:tagImage:barImage:modeImage:noteImages
-      picture = (picForLayers allImages){ 
-        picCursor = cursorObj, 
+      picture = (picForLayers allImages){
+        picCursor = cursorObj,
         picBackground = Background ' ' defAttr }
-  liftIO $ update vty picture 
+  liftIO $ update vty picture
 
 -- TODO: getInitNotes should just get all notes!!!!!!
 --       also notesInView is a misnomer, its just all the notes..
@@ -546,18 +544,18 @@ toImageLinesSack box lines = do
   loc <- getViewLoc
   lift $ toImageLines loc viewId box lines
 
--- The ExceptM toImage functions are still with respect to the 
+-- The ExceptM toImage functions are still with respect to the
 -- Sack coordinate system, hence passing in the loc argument.
 -- This is so that getNeighbors can be called and make sense.
 toImageText  :: (Pos,Pos) -> String -> Box -> String -> ExceptM Image
-toImageText loc viewId box = 
+toImageText loc viewId box =
   E.fromText (boxWidth box - 2) .> E.toLines .> toImageLines loc viewId box
 
 toImageLines :: (Pos,Pos) -> String -> Box -> [String] -> ExceptM Image
-toImageLines loc viewId box lines = 
-  let img = (I.vertCat $ map (I.string defAttr) lines) |> 
+toImageLines loc viewId box lines =
+  let img = (I.vertCat $ map (I.string defAttr) lines) |>
               I.resize (boxWidth box - 2) (boxHeight box - 2)
-   in toImage' loc viewId box img 
+   in toImage' loc viewId box img
 
 toImage' loc viewId box textImg = do
         let (Box il ir iu id) = shiftBox loc box
@@ -570,14 +568,14 @@ toImage' loc viewId box textImg = do
             bImg = I.string defAttr bot
             numN = length neighbors
             img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
-        return img 
+        return img
 
 toHighlightImage :: Box -> [String] -> Sack Image
-toHighlightImage box lines = 
+toHighlightImage box lines =
   let width     = boxWidth box - 2
       height    = boxHeight box - 2
-      selectAttr = defAttr `withBackColor` rgbColor 102 102 255-- 255 255 180-- brightWhite 
-      wrongAttr  = defAttr `withBackColor` red         
+      selectAttr = defAttr `withBackColor` rgbColor 102 102 255-- 255 255 180-- brightWhite
+      wrongAttr  = defAttr `withBackColor` red
       lImg = I.vertCat $ map (I.char selectAttr) (replicate height ' ')
       rImg = I.vertCat $ map toImgIt items
         where isTooLong xs = length xs > width
@@ -586,8 +584,8 @@ toHighlightImage box lines =
               linesMod = lines ++ repeat ""
               items = zip (map isTooLong linesMod) (replicate height ' ')
 
-      img = (I.vertCat $ map (I.string defAttr) lines) |> 
-                    I.resize (boxWidth box - 2) (boxHeight box - 2)      
+      img = (I.vertCat $ map (I.string defAttr) lines) |>
+                    I.resize (boxWidth box - 2) (boxHeight box - 2)
       tImg = I.string selectAttr $ replicate (width+2) ' '
       bImg = let attr = if length lines > height
                           then wrongAttr
@@ -617,16 +615,10 @@ addNewNoteToView box = do
       tn  = TableNote noteId "" today today
   lift $ addTvn tvn
   lift $ addTn  tn
-  
+
   state <- get
   img <- lift $ toImageText viewLoc viewId box ""
   put state { notesInView = (noteId, img):(notesInView state) }
-
-  -- we always add notes to the today view
-  if today /= viewId
-     then lift $ addTvn $ TableViewNote today noteId nullBox
-     else return ()
-
 
 placeNoteToView :: Id -> Box -> Sack ()
 placeNoteToView noteId box = do
@@ -644,7 +636,7 @@ newNoteId = (+1) <$> lift maxNoteId
 imageBox :: Color -> Box -> Image
 imageBox color (Box l r u d) = charFill attr ' ' (r-l+1) (d-u+1) |> translate l u
   where attr = withBackColor defAttr color
-  
+
 toBox (x1,y1) (x2,y2) = Box (min x1 x2) (max x1 x2) (min y1 y2) (max y1 y2)
 
 --------------------------------------------------------------------------------------
@@ -659,11 +651,11 @@ whenM bool v = do
 -- If we have the view, let it be the view,
 -- otherwise, add the view
 loadView :: String -> ExceptM ()
-loadView viewId = 
+loadView viewId =
   unlessM (hasView viewId) (addTv (TableView viewId (0,0) (0,0)))
 
 notesackSetup :: String -> ExceptM ()
-notesackSetup dbFile = do 
+notesackSetup dbFile = do
   isDir  <- liftIO $ doesDirectoryExist dbFile
   isFile <- liftIO $ doesFileExist dbFile
   case (isDir, isFile) of
@@ -680,7 +672,7 @@ boxWidth  (Box l r _ _) = r - l + 1
 boxHeight  :: Box -> Int
 boxHeight (Box _ _ u d) = d - u + 1
 
-isEnterOrI event = event   == (EvKey KEnter []) || event == (EvKey (KChar 'i') []) 
+isEnterOrI event = event   == (EvKey KEnter []) || event == (EvKey (KChar 'i') [])
 isEnterOrEsc event = event == (EvKey KEnter []) || event == (EvKey KEsc [])
 
 baseOrPlace BaseMode = True

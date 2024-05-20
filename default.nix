@@ -1,7 +1,7 @@
 { profile ? false }:
 let pkgs = import <nixpkgs> {};
-    sqlite3 = dcbPkgs.sqlite;
-    ghc = pkgs.haskellPackages.ghcWithPackages (pkgs: with pkgs; [vty]);
+    sqlite3 = pkgs.sqlite;
+    ghc = pkgs.haskellPackages.ghcWithPackages (pkgs: with pkgs; [vty vty-unix]);
     coreutils = pkgs.coreutils;
 in pkgs.stdenv.mkDerivation {
      name = "notesack";
