@@ -27,6 +27,7 @@ import Notesack.Boundary
 import Notesack.EditStr ( EditStr )
 import qualified Notesack.EditStr as E
 import Data.Char ( toLower )
+import Data.Tuple ( swap )
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -118,7 +119,7 @@ handleEventMode (StatusMode _) (EvKey KEsc []) =
   putMode BaseMode >> return False
 
 -- Try to enter edit mode
-handleEventMode BaseMode event | isEnterOrI event = do
+handleEventMode BaseMode event | isEnterOrIOr0 event = do
   viewId <- getViewId
   cursor@(l,u) <- getCursor
   notesInfo <- lift $ getNotesInArea viewId (Box l l u u)
@@ -140,8 +141,10 @@ handleEventMode BaseMode event | isEnterOrI event = do
            mode = newMode }
          handleInsertModeHelper newMode f >> return ()
            where f editStr cursor =
-                   let newCursor = E.snapCursor editStr cursor
-                    in (newCursor, editStr)
+                   case isKey '0' event of
+                     True  -> swap $ E.snapCursorToBeg editStr cursor
+                     False -> let newCursor = E.snapCursor editStr cursor
+                              in (newCursor, editStr)
   return False
 
 -- exit edit mode
@@ -697,7 +700,10 @@ boxWidth  (Box l r _ _) = r - l + 1
 boxHeight  :: Box -> Int
 boxHeight (Box _ _ u d) = d - u + 1
 
-isEnterOrI event = event   == (EvKey KEnter []) || event == (EvKey (KChar 'i') [])
+isEnterOrIOr0 event =
+  event == (EvKey KEnter []) || isKey 'i' event || isKey '0' event
+isKey x event = event == (EvKey (KChar x) [])
+
 isEnterOrEsc event = event == (EvKey KEnter []) || event == (EvKey KEsc [])
 
 baseOrPlace BaseMode = True

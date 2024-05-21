@@ -1,6 +1,6 @@
-module Notesack.EditStr ( 
-  EditStr, snapCursor, insert, delete, backspace, toLines, toText, fromText
-) where 
+module Notesack.EditStr (
+  EditStr, snapCursor, snapCursorToBeg, insert, delete, backspace, toLines, toText, fromText
+) where
 
 import Data.Sequence ( Seq, fromList, (<|), (|>), (><) )
 import qualified Data.Sequence as Seq
@@ -16,22 +16,29 @@ data EditStr = E (Seq (Seq Char))
 snapCursor :: EditStr -> (Int, Int) -> (Int, Int)
 snapCursor (E items) (x,y) =
   let nx = Seq.length (Seq.index items y)
-      ny = Seq.length items 
+      ny = Seq.length items
    in case (y < ny, x < nx) of
         (True, True)  -> (x,y)
         (True, False) -> (nx,y)
         (False, _)    -> (0,ny)
 
+snapCursorToBeg :: EditStr -> (Int, Int) -> (EditStr, (Int, Int))
+snapCursorToBeg (E is) (_,y) =
+  let n_is = Seq.length is
+      ny = max n_is (y+1)
+      items = is >< (Seq.replicate ny Seq.empty)
+   in (E items, (0, y))
+
 isValidCursor :: EditStr -> (Int, Int) -> Bool
 isValidCursor e cursor = snapCursor e cursor == cursor
 
-fixItems y items = 
+fixItems y items =
   if Seq.length items == y
      then items |> Seq.empty
      else items
 
 insert :: EditStr -> (Int, Int) -> Char -> ((Int, Int), EditStr)
-insert e cursor _ | not (isValidCursor e cursor) = error "invalid cursor" 
+insert e cursor _ | not (isValidCursor e cursor) = error "invalid cursor"
 insert (E items) (x,y) '\n' = ((0,y+1), E newItems)
   where (lhs,rhs) = Seq.splitAt y $ fixItems y items
         line = Seq.index rhs 0
@@ -44,23 +51,23 @@ insert (E items) (x,y) c = ((x+1,y), E newItems)
   where (lhs,rhs) = Seq.splitAt y $ fixItems y items
         line = Seq.index rhs 0
         newLine = Seq.insertAt x c line
-        newItems = lhs >< (newLine <| (Seq.drop 1 rhs)) 
+        newItems = lhs >< (newLine <| (Seq.drop 1 rhs))
 
 delete :: EditStr -> (Int, Int) -> ((Int, Int), EditStr)
 delete (E items) (x,y) = ((x,y), E newItems)
   where (lhs, rhs) = Seq.splitAt y $ fixItems y items
         line = Seq.index rhs 0
         rest = Seq.drop 1 rhs
-        newItems = 
+        newItems =
           if x == Seq.length line
-             then let (restLine,rest') = 
+             then let (restLine,rest') =
                         if Seq.length rest == 0
                            then (Seq.empty, Seq.empty)
                            else (Seq.index rest 0, Seq.drop 1 rest)
                    in (lhs |> (line >< restLine)) >< rest'
              else let newLine = Seq.deleteAt x line
                    in lhs >< (newLine <| rest)
---        (newCursor, newLine) = 
+--        (newCursor, newLine) =
 --          if x == Seq.length line
 --            then ((x-1,y), line)
 --            else ((x,y), Seq.deleteAt x line)
@@ -93,9 +100,9 @@ fromText _ = E . fromList . map fromList . linesMod
 
 linesMod :: String -> [String]
 linesMod ""   = []
-linesMod xs = 
+linesMod xs =
   let (lhs,rhs) = break (== '\n') xs
    in if null rhs
          then lhs:[]
-         else lhs:linesMod (tail rhs) 
+         else lhs:linesMod (tail rhs)
 
