@@ -2,8 +2,8 @@ module Notesack.Types (
   ExceptM, Sack,
   SackConfig(..), Env(..), State(..), Mode(..), SelectAction(..), EditState(..),
   TableView(..), TableViewNote(..), TableNote(..),
-  Dir(..),Pos,Id,Box(..),
-  askVty, askSackConfig, getViewId, getViewLoc, getMode, putMode, 
+  Dir(..), Corner(..), Pos, Id, Box(..),
+  askVty, askSackConfig, getViewId, getViewLoc, getMode, putMode,
   getStatusError, putStatusError,
   getCursor, putCursor, putMoveCursor, moveLoc, nullBox,
   throwErrorIf
@@ -42,8 +42,8 @@ type Id  = Int
 --                      - typing modifies text contents of the box
 --   EditMode.Visual    - select a region and copy it
 --   TODO: update this comment
-data Mode = 
-    BaseMode 
+data Mode =
+    BaseMode
   | SelectMode (Pos,Pos) SelectAction
   | StatusMode String
   | EditMode Id Box EditStr EditState
@@ -59,6 +59,8 @@ nullBox = Box 0 0 0 0
 
 data Dir = DirL | DirR | DirU | DirD
 
+data Corner = CornerTL | CornerTR | CornerBL | CornerBR
+
 -- things related to drawing boxes
 -- inputs / hot keys / wtvr related to input stuff
 data SackConfig = SackConfig
@@ -72,11 +74,11 @@ data Env = Env {
 -- all boxes need to be global as well
 -- all images need to be translated with respect to the tvLoc
 -- the cursor is the global cursor
-data State = State { 
+data State = State {
   viewId :: String,
   viewLoc :: (Pos,Pos),
   mode :: Mode,
-  cursor :: (Pos,Pos),           
+  cursor :: (Pos,Pos),
   windowSize :: (Int,Int),
   notesInView :: [(Id, Image)],
   statusError :: String
