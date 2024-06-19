@@ -28,6 +28,8 @@ import Notesack.EditStr ( EditStr )
 import qualified Notesack.EditStr as E
 import Data.Char ( toLower )
 import Data.Tuple ( swap )
+import Data.Maybe ( catMaybes )
+import qualified Data.Array as A
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -59,10 +61,11 @@ getInitState viewId = do
   -- we need the location of the table view
   -- (it's a bit silly because we may have just
   --  added this row to the View table, but oh well)
-  (loc@(locL,locU),tvCursor@(tvL,tvU)) <- lookupView viewId
+  (loc,tvCursor@(tvL,tvU)) <- lookupView viewId
   initWindowSize <- liftIO getWindowSize
   initNotesInView <- getInitNotes viewId loc initWindowSize
   unplacedNotes <- getUnplacedNotes viewId
+  initFarBars <- getFarBars loc initWindowSize viewId
   let initMode =
         if null unplacedNotes
            then BaseMode
@@ -74,6 +77,7 @@ getInitState viewId = do
         tvCursor
         initWindowSize
         initNotesInView
+        initFarBars
         ""
   return initState
 
@@ -480,9 +484,11 @@ resetViewLoc (newL,newU) = do
   (wx,wy) <- windowSize <$> get
   viewId <- getViewId
   newNotesInView <- lift $ getInitNotes viewId (newL,newU) (wx,wy)
+  newFarBars <- lift $ getFarBars (newL,newU) (wx,wy) viewId
   stateIn <- get
   put $ stateIn{ viewLoc = (newL,newU),
-                 notesInView = newNotesInView }
+                 notesInView = newNotesInView,
+                 farBars = newFarBars }
 
 resizeSelected :: Corner -> Sack ()
 resizeSelected corner =
@@ -550,7 +556,25 @@ drawSack = do
                      else I.string toRowTagAttr t
   let barImage = I.vertCat (map toRowTag allTags)
 
-  let allImages = statusImage:tagImage:barImage:modeImage:noteImages
+  -- Shift status, tag, bar, and mode depending on the counts
+  (lCnt,rCnt,uCnt,dCnt) <- farBars <$> get
+  let fixBLImage =
+        case (lCnt, dCnt) of
+          (Just _, Just _)   -> translate 1 (-1)
+          (Just _, Nothing)  -> translate 1 0
+          (Nothing, Just _)  -> translate 0 (-1)
+          (Nothing, Nothing) -> translate 0 0
+      fixTLImage =
+        case (lCnt, uCnt) of
+          (Just _, Just _)   -> translate 1 1
+          (Just _, Nothing)  -> translate 1 0
+          (Nothing, Just _)  -> translate 0 1
+          (Nothing, Nothing) -> translate 0 0
+  let statusImageX = fixBLImage statusImage
+      tagImageX    = fixBLImage tagImage
+      barImageX    = fixTLImage barImage
+  let cnts = catMaybes [lCnt,rCnt,uCnt,dCnt]
+  let allImages = cnts ++ (statusImageX:tagImageX:barImageX:modeImage:noteImages)
       picture = (picForLayers allImages){
         picCursor = cursorObj,
         picBackground = Background ' ' defAttr }
@@ -597,6 +621,23 @@ toImage' loc viewId box textImg = do
             numN = length neighbors
             img = I.vertCat [tImg, I.horizCat [lImg, textImg, rImg], bImg] |> translate il iu
         return img
+
+getFarBars :: (Pos, Pos) -> (Pos, Pos) -> String
+  -> ExceptM (Maybe Image, Maybe Image, Maybe Image, Maybe Image)
+getFarBars (locL, locU) (nCol, nRow) viewId = do
+  lhsFarIntervals <- shiftIntervals locU <$> getFarIntervals DirL viewId locL
+  let lhsFar = makeVertCountImage 0 nRow lhsFarIntervals
+
+  rhsFarIntervals <- shiftIntervals locU <$> getFarIntervals DirR viewId (locL+nCol)
+  let rhsFar = makeVertCountImage (nCol-1) nRow rhsFarIntervals
+
+  uppFarIntervals <- shiftIntervals locL <$> getFarIntervals DirU viewId locU
+  let uppFar = makeHoriCountImage 0 nCol uppFarIntervals
+
+  dwnFarIntervals <- shiftIntervals locL <$> getFarIntervals DirD viewId (locU+nRow)
+  let dwnFar = makeHoriCountImage (nRow-1) nCol dwnFarIntervals
+
+  return (Just lhsFar, Just rhsFar, Just uppFar, Just dwnFar)
 
 toHighlightImage :: Box -> [String] -> Sack Image
 toHighlightImage box lines =
@@ -661,11 +702,43 @@ placeNoteToView noteId box = do
 newNoteId :: Sack Id
 newNoteId = (+1) <$> lift maxNoteId
 
-imageBox :: Color -> Box -> Image
-imageBox color (Box l r u d) = charFill attr ' ' (r-l+1) (d-u+1) |> translate l u
+imageBoxChar :: Char -> Color -> Box -> Image
+imageBoxChar char color (Box l r u d) = charFill attr char (r-l+1) (d-u+1) |> translate l u
   where attr = withBackColor defAttr color
 
+imageBox :: Color -> Box -> Image
+imageBox = imageBoxChar ' '
+
 toBox (x1,y1) (x2,y2) = Box (min x1 x2) (max x1 x2) (min y1 y2) (max y1 y2)
+
+shiftIntervals :: Pos -> [(Pos,Pos)] -> [(Pos,Pos)]
+shiftIntervals x = map f
+  where f (a, b) = (a-x,b-x)
+
+--------------------------------------------------------------------------------------
+
+makeCountImage :: (Image -> Image -> Image) -> Pos -> [(Pos, Pos)] -> Image
+makeCountImage join nMax items =
+  let clip v = min (max v 0) (nMax-1)
+      fixItem (x,y) = zip (range (clip x) (clip y)) (repeat 1)
+      range x y = take (y-x+1) $ iterate (+1) x -- range 0 5 == [0,1,2,3,4,5]
+      counts = A.elems $ A.accumArray (\a _ -> a+1) 0 (0, nMax-1) $ concat (map fixItem items)
+
+      filled   = char (withBackColor defAttr anColor) ' '
+      unfilled = char defAttr                          ' '
+      anColor = rgbColor 236 21 236
+      asImage 0 = unfilled
+      asImage _ = filled
+
+   in foldr join emptyImage $ map asImage counts
+
+makeVertCountImage :: Pos -> Pos -> [(Pos, Pos)] -> Image
+makeVertCountImage xPos nRow items =
+  translate xPos 0 $ makeCountImage vertJoin nRow items
+
+makeHoriCountImage :: Pos -> Pos -> [(Pos, Pos)] -> Image
+makeHoriCountImage yPos nCol items =
+  translate 0 yPos $ makeCountImage horizJoin nCol items
 
 --------------------------------------------------------------------------------------
 

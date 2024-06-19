@@ -81,6 +81,7 @@ data State = State {
   cursor :: (Pos,Pos),
   windowSize :: (Int,Int),
   notesInView :: [(Id, Image)],
+  farBars :: (Maybe Image, Maybe Image, Maybe Image, Maybe Image), -- (l,r,u,d)
   statusError :: String
 }
 

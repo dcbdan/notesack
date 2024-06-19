@@ -5,8 +5,8 @@ module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
   hasView, lookupView, addTv, addTvn, addTn, saveView,
   areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
-  getNeighbors, updateNote, updateTvn,
-  getNextDay, getPrevDay, tvnRemove, tvnRemoveNote, 
+  getNeighbors, getFarIntervals, updateNote, updateTvn,
+  getNextDay, getPrevDay, tvnRemove, tvnRemoveNote,
   listTags, listSelectedTags
 ) where
 
@@ -30,7 +30,7 @@ lookupView id =
   let sqlStr = "SELECT LocX, LocY, CurX, CurY FROM View WHERE ViewId == \"%w\";"
       sql = SqlQuery sqlStr [id]
       e = "lookupView"
-      fixRow items = 
+      fixRow items =
         let [a,b,c,d] = map fromObjInt items
          in ((a,b),(c,d))
    in (fixRow . head) <$> getTable e sql [SqlInt, SqlInt, SqlInt, SqlInt]
@@ -44,7 +44,7 @@ saveView viewId (a,b) (c,d) =
         "    CurX = "++show c ++ ",",
         "    CurY = "++show d,
         "WHERE ViewId = \"%w\";"]
-   in exec "saveView" (SqlQuery sqlStr [viewId]) 
+   in exec "saveView" (SqlQuery sqlStr [viewId])
 
 addTv :: TableView -> ExceptM ()
 addTv (TableView id (a,b) (c,d)) =
@@ -74,7 +74,7 @@ addTn (TableNote noteId' text' created' changed') =
       add_note (fromIntegral noteId') text created changed
 
 openDatabaseAndInit :: String -> ExceptM ()
-openDatabaseAndInit str = 
+openDatabaseAndInit str =
   do let err = "could not open and initialize database"
      libCall err $ withCString str i_open
      libCall err i_init
@@ -95,7 +95,7 @@ maxNoteId :: ExceptM Id
 maxNoteId = fromIntegral <$> (libCall "maxNoteId" max_note_id)
 
 getUnplacedNotes :: String -> ExceptM [Id]
-getUnplacedNotes viewId = 
+getUnplacedNotes viewId =
   let sqlStr = unlines $ [
         "SELECT NoteId FROM ViewNote",
         " WHERE ViewId = \"%w\"",
@@ -109,7 +109,7 @@ updateTvn :: String -> Int -> Box -> ExceptM ()
 updateTvn viewId noteId (Box l r u d) =
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sqlStr = unlines $ [
-        "UPDATE ViewNote ", 
+        "UPDATE ViewNote ",
         "SET LocL = "++show l ++ ",",
         "    LocR = "++show r ++ ",",
         "    LocU = "++show u ++ ",",
@@ -119,14 +119,14 @@ updateTvn viewId noteId (Box l r u d) =
    in exec "update tvn" (SqlQuery sqlStr [viewId])
 
 getNotesInArea :: String -> Box -> ExceptM [(Id, Box, String)]
-getNotesInArea viewId (Box l r u d) = 
+getNotesInArea viewId (Box l r u d) =
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sqlStr = unlines $ [
         "SELECT Note.NoteId, Text, LocL, LocR, LocU, LocD FROM Note JOIN ViewNote ",
         "WHERE MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ", -- has intersection
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
         "  AND (LocL != 0 OR LocR != 0 OR               ", -- remove null boxes
-        "       LocU != 0 OR LocD != 0)                 ",  
+        "       LocU != 0 OR LocD != 0)                 ",
         "  AND Note.NoteId == ViewNote.NoteId           ", -- is the right note
         "  AND ViewNote.ViewId == \"%w\";"]                -- is the right view
       sql = SqlQuery sqlStr [viewId]
@@ -136,8 +136,29 @@ getNotesInArea viewId (Box l r u d) =
          in (fromObjInt which,Box l r u d, fromObjText txt)
    in map fixRow <$> getTable e sql [SqlInt, SqlText, SqlInt, SqlInt, SqlInt, SqlInt]
 
+getFarIntervals :: Dir -> String -> Pos -> ExceptM [(Pos,Pos)]
+getFarIntervals dir viewId minV =
+  let (select, condition) =
+        case dir of
+          DirL -> ("LocU, LocD", "LocL <= "++show minV)
+          DirR -> ("LocU, LocD", "LocR >= "++show minV)
+          DirU -> ("LocL, LocR", "LocU <= "++show minV)
+          DirD -> ("LocL, LocR", "LocD >= "++show minV)
+      sqlStr = unlines $ [
+        "SELECT "++select++" FROM ViewNote",
+        "WHERE ViewNote.ViewId == \"%w\"  ", -- is the right view
+        "  AND "++condition++"            ", -- has a part past the boundary
+        "  AND (LocL != 0 OR LocR != 0 OR ", -- remove null boxes
+        "       LocU != 0 OR LocD != 0);  "]
+      sql = SqlQuery sqlStr [viewId]
+      e = "getFarIntervals"
+      fixRow items =
+        let [a,b] = map fromObjInt items
+         in (a,b)
+   in map fixRow <$> getTable e sql [SqlInt, SqlInt]
+
 getNeighbors :: String -> Box -> ExceptM [Box]
-getNeighbors viewId (Box l r u d) = 
+getNeighbors viewId (Box l r u d) =
   let [sl,sr,su,sd] = map show [l,r,u,d]
       sqlStr = unlines $ [
         "SELECT LocL, LocR, LocU, LocD FROM ViewNote",
@@ -145,18 +166,18 @@ getNeighbors viewId (Box l r u d) =
         "  AND MAX(LocL,"++sl++") <= MIN(LocR,"++sr++") ", -- has intersection
         "  AND MAX(LocU,"++su++") <= MIN(LocD,"++sd++") ",
         "  AND (LocL != 0 OR LocR != 0 OR               ", -- remove null boxes
-        "       LocU != 0 OR LocD != 0)                 ", 
+        "       LocU != 0 OR LocD != 0)                 ",
         "  AND (LocL != "++sl++" OR LocR != "++sr++" OR ", -- is not self
         "       LocU != "++su++" OR LocD != "++sd++");"]
       sql = SqlQuery sqlStr [viewId]
       e = "getNeighbors"
-      fixRow items = 
+      fixRow items =
         let [a,b,c,d] = map fromObjInt items
          in Box a b c d
    in map fixRow <$> getTable e sql [SqlInt, SqlInt, SqlInt, SqlInt]
 
 updateNote :: Id -> String -> ExceptM ()
-updateNote noteId text = 
+updateNote noteId text =
   do today <- lift $ getDate
      exec "updateNote" (sql today)
   where sql today = SqlQuery (query today) [text]
@@ -167,33 +188,33 @@ updateNote noteId text =
           "WHERE NoteId = "++show noteId++";"]
 
 getNextDay :: String -> ExceptM (Maybe String)
-getNextDay date = 
+getNextDay date =
   let sqlStr = unlines $ [
         "SELECT ViewId FROM View",
         "WHERE ViewId > \"%w\"",
         "ORDER BY ViewId ASC"]
       fixRow [x] = fromObjText x
-   in do table <- filter isDateLike . map fixRow 
-                    <$> getTable "getNextDay" (SqlQuery sqlStr [date]) [SqlText] 
+   in do table <- filter isDateLike . map fixRow
+                    <$> getTable "getNextDay" (SqlQuery sqlStr [date]) [SqlText]
          case table of
            []    -> return Nothing
            (x:_) -> return $ Just x
 
 getPrevDay :: String -> ExceptM (Maybe String)
-getPrevDay date = 
+getPrevDay date =
   let sqlStr = unlines $ [
         "SELECT ViewId FROM View",
         "WHERE ViewId < \"%w\"",
         "ORDER BY ViewId DESC"]
       fixRow [x] = fromObjText x
-   in do table <- filter isDateLike . map fixRow 
-                    <$> getTable "getPrevDay" (SqlQuery sqlStr [date]) [SqlText] 
+   in do table <- filter isDateLike . map fixRow
+                    <$> getTable "getPrevDay" (SqlQuery sqlStr [date]) [SqlText]
          case table of
            []    -> return Nothing
            (x:_) -> return $ Just x
 
 tvnRemove :: String -> Id -> ExceptM ()
-tvnRemove viewId noteId = 
+tvnRemove viewId noteId =
   let sqlStr = unlines $ [
         "DELETE FROM ViewNote",
         "WHERE ViewId = \"%w\"",
@@ -201,7 +222,7 @@ tvnRemove viewId noteId =
    in exec "tvnRemove" $ SqlQuery sqlStr [viewId]
 
 tvnRemoveNote :: Id -> ExceptM ()
-tvnRemoveNote noteId = 
+tvnRemoveNote noteId =
   let sqlStr = unlines $ [
         "DELETE FROM ViewNote",
         "WHERE NoteId = "++show noteId++";"]
@@ -209,14 +230,14 @@ tvnRemoveNote noteId =
 
 -- Get all tags except the date tags
 listTags :: ExceptM [String]
-listTags = 
+listTags =
   let sqlStr = unlines $ [
         "SELECT DISTINCT ViewNote.ViewId",
         "FROM ViewNote JOIN Note",
         "WHERE ViewNote.NoteId = Note.NoteId",
         "ORDER BY Note.DateChanged DESC;"]
       fixRow [x] = fromObjText x
-   in filter (not . isDateLike) . map fixRow 
+   in filter (not . isDateLike) . map fixRow
         <$> getTable "listTags" (SqlQuery sqlStr []) [SqlText]
 
 listSelectedTags :: Id -> ExceptM [String]
@@ -225,7 +246,7 @@ listSelectedTags id =
       fixRow [x] = fromObjText x
    in filter (not . isDateLike) . map fixRow
         <$> getTable "listSelectedTags" (SqlQuery sqlStr []) [SqlText]
-     
+
 
 data SqlQuery = SqlQuery String [String]
 data SqlType = SqlInt | SqlText
@@ -236,9 +257,9 @@ getTable :: String -> SqlQuery -> [SqlType] -> ExceptM [[SqlObj]]
 getTable err sqlQ columns = withSqlQuery sqlQ $ \sql -> do
   handle <- libCall err $ stmt_init sql
   let incrementHandle = (==1) <$> (libCall err $ stmt_increment handle)
-      getColumn (SqlInt, i) = (ObjInt . fromIntegral) <$> 
+      getColumn (SqlInt, i) = (ObjInt . fromIntegral) <$>
         (libCall err $ stmt_column_int handle i)
-      getColumn (SqlText, i) = ObjText <$> 
+      getColumn (SqlText, i) = ObjText <$>
         (libCall err (stmt_column_text handle i) >>= liftIO . peekCString)
       getInfo = mapM getColumn $ zip columns [0..]
   ret <- doUntil incrementHandle getInfo
@@ -251,10 +272,10 @@ exec err sqlQ = withSqlQuery sqlQ $ \sql -> libCall err (i_exec sql)
 
 withSqlQuery :: SqlQuery -> (CString -> ExceptM a) -> ExceptM a
 withSqlQuery (SqlQuery sql []) f = do
-  sqlC <- lift $ newCString sql 
+  sqlC <- lift $ newCString sql
   ret <- f sqlC
   lift $ free sqlC
-  return ret 
+  return ret
 withSqlQuery (SqlQuery sql [arg1]) f = do
   let newCString'   a   = lift $ newCString a
       mprintf1'     a b = lift $ mprintf1 a b
@@ -271,9 +292,9 @@ withSqlQuery (SqlQuery sql [arg1]) f = do
 withSqlQuery _ _ = error "Not implemented; Can only replace 1 string in a sql query"
 
 doUntil :: Monad m => m Bool -> m a -> m [a]
-doUntil checkIt doIt = 
+doUntil checkIt doIt =
   do stopNow <- checkIt
-     if stopNow 
+     if stopNow
         then return []
         else do ret <- doIt
                 rest <- doUntil checkIt doIt
@@ -286,7 +307,7 @@ libCall errStr doIt = do
   if errCode /= 0
      then throwError $ errStr ++ " (error code: "++show errCode++")"
      else return ret
-  
+
 foreign import ccall "interface.h i_open"
   i_open :: CString -> IO ()
 foreign import ccall "interface.h i_init"
