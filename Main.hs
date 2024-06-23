@@ -490,6 +490,15 @@ resetViewLoc (newL,newU) = do
                  notesInView = newNotesInView,
                  farBars = newFarBars }
 
+redrawFarBars :: Sack ()
+redrawFarBars = do
+  stateIn <- get
+  let ws = windowSize stateIn
+      vl = viewLoc stateIn
+      vi = viewId stateIn
+  newFarBars <- lift $ getFarBars vl ws vi
+  put $ stateIn { farBars = newFarBars }
+
 resizeSelected :: Corner -> Sack ()
 resizeSelected corner =
   let makeBox (cX, cY) (Box l r u d) =
@@ -501,7 +510,9 @@ resizeSelected corner =
       f Nothing = return ()
       f (Just (noteId, _, box, cursor)) =
         placeNoteToView noteId $ makeBox cursor box
-   in getSelectedInfo >>= f
+   in do getSelectedInfo >>= f
+         redrawFarBars -- note: resizing may have moved the note into the view entirely,
+                       --       changing the corresponding far bar
 
 cursorOnScreen :: Sack Bool
 cursorOnScreen = do
