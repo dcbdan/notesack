@@ -4,7 +4,7 @@
 module Notesack.Database (
   openDatabaseAndInit, openDatabase, closeDatabase,
   hasView, lookupView, addTv, addTvn, addTn, saveView,
-  areaHasNote, maxNoteId, getNotesInArea, getUnplacedNotes,
+  areaHasNote, maxNoteId, canPlace, getNotesInArea, getUnplacedNotes,
   getNeighbors, getFarIntervals, updateNote, updateTvn,
   getNextDay, getPrevDay, tvnRemove, tvnRemoveNote,
   listTags, listSelectedTags
@@ -117,6 +117,23 @@ updateTvn viewId noteId (Box l r u d) =
         "WHERE ViewId = \"%w\"",
         "  AND NoteId = "++show noteId++";"]
    in exec "update tvn" (SqlQuery sqlStr [viewId])
+
+canPlace :: String -> Id -> Box -> ExceptM Bool
+canPlace viewId noteId (Box l r u d) =
+  let [sl,sr,su,sd] = map show [l+1,r,u+1,d]
+      sqlStr = unlines $ [
+        "SELECT NoteId FROM ViewNote",
+        "WHERE MAX(LocL+1,"++sl++") <= MIN(LocR,"++sr++") ", -- has intersection
+        "  AND MAX(LocU+1,"++su++") <= MIN(LocD,"++sd++") ",
+        "  AND (LocL != 0 OR LocR != 0 OR               ", -- remove null boxes
+        "       LocU != 0 OR LocD != 0)                 ",
+        "  AND NoteId != "++show noteId++"              ", -- is the right note
+        "  AND ViewNote.ViewId == \"%w\";"]                -- is the right view
+      sql = SqlQuery sqlStr [viewId]
+      e = "canPlace"
+      f [] = True
+      f _  = False
+   in f <$> getTable e sql [SqlInt]
 
 getNotesInArea :: String -> Box -> ExceptM [(Id, Box, String)]
 getNotesInArea viewId (Box l r u d) =

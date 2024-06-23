@@ -30,6 +30,7 @@ import Data.Char ( toLower )
 import Data.Tuple ( swap )
 import Data.Maybe ( catMaybes )
 import qualified Data.Array as A
+import Text.Read ( readMaybe )
 
 --I'd prefer to use vty to get the inital window size,
 --but even though they have a way to do it, it doesn't
@@ -292,7 +293,9 @@ data Command =
   | CommandPrevDay
   | CommandNextDay
   | CommandArchive
-  | CommandResize Corner
+  | CommandResizeR Bool String
+  | CommandResizeC Bool String
+  | CommandResizeCorner Corner
   | CommandShrink Bool Bool
   | NoCommand
 
@@ -310,10 +313,14 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("today":[])     = CommandToday
         recurse ("viewl":[])     = CommandPrevDay
         recurse ("viewr":[])     = CommandNextDay
-        recurse ("tl":[])        = CommandResize CornerTL
-        recurse ("tr":[])        = CommandResize CornerTR
-        recurse ("bl":[])        = CommandResize CornerBL
-        recurse ("br":[])        = CommandResize CornerBR
+        recurse ("+r":val:[])    = CommandResizeR True val
+        recurse ("-r":val:[])    = CommandResizeR False val
+        recurse ("+c":val:[])    = CommandResizeC True val
+        recurse ("-c":val:[])    = CommandResizeC False val
+        recurse ("tl":[])        = CommandResizeCorner CornerTL
+        recurse ("tr":[])        = CommandResizeCorner CornerTR
+        recurse ("bl":[])        = CommandResizeCorner CornerBL
+        recurse ("br":[])        = CommandResizeCorner CornerBR
         recurse ("shrink":[])    = CommandShrink True True
         recurse ("sr":[])        = CommandShrink True False
         recurse ("sc":[])        = CommandShrink False True
@@ -326,19 +333,21 @@ runCommand :: String -> Sack Bool
 runCommand commandStr = do
   let command = parseCommand commandStr
   case command of
-    CommandTag   tag   -> tagSelected   tag >> putMode BaseMode
-    CommandUntag tag   -> untagSelected tag >> putMode BaseMode
-    CommandView  tag   -> switchView tag
-    CommandClose       -> closeSelected
-    CommandToday       -> liftIO getDate >>= switchView
-    CommandWhich       -> getViewId >>= putStatusError >> putMode BaseMode
-    CommandPrevDay     -> switchViewPrevDay
-    CommandNextDay     -> switchViewNextDay
-    CommandArchive     -> archiveSelected >> putMode BaseMode
-    CommandQuit        -> shutdownSack
-    CommandResize cor  -> resizeSelected cor >> putMode BaseMode
-    CommandShrink r c  -> shrinkSelected r c >> putMode BaseMode
-    NoCommand          -> setStatusError "invalid command" >> putMode BaseMode
+    CommandTag   tag          -> tagSelected   tag >> putMode BaseMode
+    CommandUntag tag          -> untagSelected tag >> putMode BaseMode
+    CommandView  tag          -> switchView tag
+    CommandClose              -> closeSelected
+    CommandToday              -> liftIO getDate >>= switchView
+    CommandWhich              -> getViewId >>= putStatusError >> putMode BaseMode
+    CommandPrevDay            -> switchViewPrevDay
+    CommandNextDay            -> switchViewNextDay
+    CommandArchive            -> archiveSelected >> putMode BaseMode
+    CommandQuit               -> shutdownSack
+    CommandResizeR isPos sVal -> changeSelectedSize isPos sVal True "0" >> putMode BaseMode
+    CommandResizeC isPos sVal -> changeSelectedSize True "0" isPos sVal >> putMode BaseMode
+    CommandResizeCorner cor   -> resizeSelected cor >> putMode BaseMode
+    CommandShrink r c         -> shrinkSelected r c >> putMode BaseMode
+    NoCommand                 -> setStatusError "invalid command" >> putMode BaseMode
   case command of
     CommandQuit -> return True
     _           -> return False
@@ -518,6 +527,29 @@ resizeSelected corner =
    in do getSelectedInfo >>= f
          updateFarBars -- note: resizing may have moved the note into the view entirely,
                        --       changing the corresponding far bar
+
+changeSelectedSize :: Bool -> String -> Bool -> String -> Sack ()
+changeSelectedSize a b c d =
+  let fix isPos sVal = do -- Maybe monad do
+        val <- readMaybe sVal
+        return $ if isPos then val else -1*val
+      f diffRow diffCol Nothing = putStatusError "expected one note here"
+      f diffRow diffCol (Just (noteId, viewId, Box l r u d, cursor@(cL, cU))) =
+        let nColIn = r-l-1
+            nRowIn = d-u-1
+            newBox = Box l (r+diffCol) u (d+diffRow)
+         in if (nColIn+diffCol < 1) || (nRowIn+diffRow < 1)
+            then putStatusError "invalid sizing"
+            else do -- if it'd overlap, we are no good
+                    success <- lift $ canPlace viewId noteId newBox
+                    if success
+                       then placeNoteToView noteId newBox >> updateFarBars
+                       else putStatusError "cannot overlap notes"
+
+   in case (fix a b, fix c d) of
+        (Nothing, _) -> putStatusError $ "Cannot parse '" ++ b ++ "'"
+        (_, Nothing) -> putStatusError $ "Cannot parse '" ++ d ++ "'"
+        (Just diffRow, Just diffCol) -> getSelectedInfo >>= f diffRow diffCol
 
 shrinkSelected :: Bool -> Bool -> Sack ()
 shrinkSelected sRows sCols = do
