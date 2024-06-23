@@ -293,6 +293,7 @@ data Command =
   | CommandNextDay
   | CommandArchive
   | CommandResize Corner
+  | CommandShrink Bool Bool
   | NoCommand
 
 parseCommand :: String -> Command
@@ -313,6 +314,9 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("tr":[])        = CommandResize CornerTR
         recurse ("bl":[])        = CommandResize CornerBL
         recurse ("br":[])        = CommandResize CornerBR
+        recurse ("shrink":[])    = CommandShrink True True
+        recurse ("sr":[])        = CommandShrink True False
+        recurse ("sc":[])        = CommandShrink False True
         recurse ("ARCHIVE":[])   = CommandArchive
         recurse ("quit":[])      = CommandQuit
         recurse ("q":[])         = CommandQuit
@@ -322,18 +326,19 @@ runCommand :: String -> Sack Bool
 runCommand commandStr = do
   let command = parseCommand commandStr
   case command of
-    CommandTag   tag  -> tagSelected   tag >> putMode BaseMode
-    CommandUntag tag  -> untagSelected tag >> putMode BaseMode
-    CommandView  tag  -> switchView tag
-    CommandClose      -> closeSelected
-    CommandToday      -> liftIO getDate >>= switchView
-    CommandWhich      -> getViewId >>= putStatusError >> putMode BaseMode
-    CommandPrevDay    -> switchViewPrevDay
-    CommandNextDay    -> switchViewNextDay
-    CommandArchive    -> archiveSelected >> putMode BaseMode
-    CommandQuit       -> shutdownSack
-    CommandResize cor -> resizeSelected cor >> putMode BaseMode
-    NoCommand         -> setStatusError "invalid command" >> putMode BaseMode
+    CommandTag   tag   -> tagSelected   tag >> putMode BaseMode
+    CommandUntag tag   -> untagSelected tag >> putMode BaseMode
+    CommandView  tag   -> switchView tag
+    CommandClose       -> closeSelected
+    CommandToday       -> liftIO getDate >>= switchView
+    CommandWhich       -> getViewId >>= putStatusError >> putMode BaseMode
+    CommandPrevDay     -> switchViewPrevDay
+    CommandNextDay     -> switchViewNextDay
+    CommandArchive     -> archiveSelected >> putMode BaseMode
+    CommandQuit        -> shutdownSack
+    CommandResize cor  -> resizeSelected cor >> putMode BaseMode
+    CommandShrink r c  -> shrinkSelected r c >> putMode BaseMode
+    NoCommand          -> setStatusError "invalid command" >> putMode BaseMode
   case command of
     CommandQuit -> return True
     _           -> return False
@@ -490,8 +495,8 @@ resetViewLoc (newL,newU) = do
                  notesInView = newNotesInView,
                  farBars = newFarBars }
 
-redrawFarBars :: Sack ()
-redrawFarBars = do
+updateFarBars :: Sack ()
+updateFarBars = do
   stateIn <- get
   let ws = windowSize stateIn
       vl = viewLoc stateIn
@@ -511,8 +516,22 @@ resizeSelected corner =
       f (Just (noteId, _, box, cursor)) =
         placeNoteToView noteId $ makeBox cursor box
    in do getSelectedInfo >>= f
-         redrawFarBars -- note: resizing may have moved the note into the view entirely,
+         updateFarBars -- note: resizing may have moved the note into the view entirely,
                        --       changing the corresponding far bar
+
+shrinkSelected :: Bool -> Bool -> Sack ()
+shrinkSelected sRows sCols = do
+  viewId <- getViewId
+  cursor@(ll,uu) <- getCursor
+  allBoxesHere <- lift $ getNotesInArea viewId (Box ll ll uu uu)
+  case allBoxesHere of
+        []               -> return ()
+        [(noteId,Box l r u d,txt)] -> do
+          let (nrow,ncol) = E.stringDims txt
+              newR = if sCols then (l+ncol+1) else r
+              newD = if sRows then (u+nrow+1) else d
+          placeNoteToView noteId $ Box l newR u newD
+        _                -> return ()
 
 cursorOnScreen :: Sack Bool
 cursorOnScreen = do

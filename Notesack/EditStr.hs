@@ -1,5 +1,6 @@
 module Notesack.EditStr (
-  EditStr, snapCursor, snapCursorToBeg, insert, delete, backspace, toLines, toText, fromText
+  EditStr, snapCursor, snapCursorToBeg, insert, delete, backspace, toLines, toText, fromText,
+  stringDims
 ) where
 
 import Data.Sequence ( Seq, fromList, (<|), (|>), (><) )
@@ -106,3 +107,9 @@ linesMod xs =
          then lhs:[]
          else lhs:linesMod (tail rhs)
 
+stringDims :: String -> (Int, Int)
+stringDims s =
+  let ls = linesMod s
+      ncol = maximum $ map length ls
+      nrow = length ls
+   in (nrow,ncol)
