@@ -7,6 +7,7 @@ module Notesack.Database (
   areaHasNote, maxNoteId, canPlace, getNotesInArea, getUnplacedNotes,
   getNeighbors, getFarIntervals, updateNote, updateTvn,
   getNextDay, getPrevDay, tvnRemove, tvnRemoveNote,
+  getResizeNote,
   listTags, listSelectedTags
 ) where
 
@@ -244,6 +245,31 @@ tvnRemoveNote noteId =
         "DELETE FROM ViewNote",
         "WHERE NoteId = "++show noteId++";"]
    in exec "tvnRemoveNote" $ SqlQuery sqlStr []
+
+getResizeNote :: String -> (Pos, Pos) -> ExceptM (Maybe (Int, (Pos, Pos)))
+getResizeNote view (cursorX, cursorY) =
+  let sqlStrTopLeftNotes = unlines $ [
+        "SELECT NoteId, LocL, LocU FROM ViewNote ",
+        "WHERE ViewId = \"%w\"",
+        "AND "++show cursorX++" > LocL AND "++show cursorY++" > LocU;"]
+      sqlTopLeftNotes = SqlQuery sqlStrTopLeftNotes [view]
+      sqlSchema3Ints = [SqlInt, SqlInt, SqlInt]
+      fix3Ints items =
+        let [a,b,c] = map fromObjInt items
+         in (a,b,c)
+
+      findCanPlace [] = throwError "could not place anything..."
+      findCanPlace ((id,l,u):xs) = do
+        success <- canPlace view id (Box l cursorX u cursorY)
+        if success
+          then return $ Just (id, (l,u))
+          else findCanPlace xs
+
+   in do notes <- map fix3Ints <$> getTable "TopLeftNotes" sqlTopLeftNotes sqlSchema3Ints
+         case notes of
+           [] -> return Nothing
+           [(id,l,u)] -> return $ Just (id,(l,u))
+           xs -> findCanPlace xs
 
 -- Get all tags except the date tags
 listTags :: ExceptM [String]

@@ -293,6 +293,7 @@ data Command =
   | CommandPrevDay
   | CommandNextDay
   | CommandArchive
+  | CommandResizeCursor
   | CommandResizeR Bool String
   | CommandResizeC Bool String
   | CommandResizeCorner Corner
@@ -313,6 +314,8 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("today":[])     = CommandToday
         recurse ("viewl":[])     = CommandPrevDay
         recurse ("viewr":[])     = CommandNextDay
+        recurse ("r":[])         = CommandResizeCursor
+        recurse ("resize":[])    = CommandResizeCursor
         recurse ("+r":val:[])    = CommandResizeR True val
         recurse ("-r":val:[])    = CommandResizeR False val
         recurse ("+c":val:[])    = CommandResizeC True val
@@ -343,6 +346,7 @@ runCommand commandStr = do
     CommandNextDay            -> switchViewNextDay
     CommandArchive            -> archiveSelected >> putMode BaseMode
     CommandQuit               -> shutdownSack
+    CommandResizeCursor       -> tryToResize >> putMode BaseMode
     CommandResizeR isPos sVal -> changeSelectedSize isPos sVal True "0" >> putMode BaseMode
     CommandResizeC isPos sVal -> changeSelectedSize True "0" isPos sVal >> putMode BaseMode
     CommandResizeCorner cor   -> resizeSelected cor >> putMode BaseMode
@@ -528,6 +532,23 @@ resizeSelected corner =
          updateFarBars -- note: resizing may have moved the note into the view entirely,
                        --       changing the corresponding far bar
 
+-- 1. for all notes to the top left
+tryToResize :: Sack ()
+tryToResize =
+  let validBox (Box l r u d) =
+        let textArea = (r-l-1)*(d-u-1)
+         in textArea > 0
+   in do view <- viewId <$> get
+         cursor@(cX,cY) <- cursor <$> get
+         val <- lift $ getResizeNote view cursor
+         case val of
+           Nothing -> putStatusError "could not get resize note"
+           Just (id, (l,u)) ->
+             let box = Box l cX u cY
+              in if validBox box
+                    then placeNoteToView id box
+                    else putStatusError "cannot resize to size zero"
+
 changeSelectedSize :: Bool -> String -> Bool -> String -> Sack ()
 changeSelectedSize a b c d =
   let fix isPos sVal = do -- Maybe monad do
@@ -563,6 +584,7 @@ shrinkSelected sRows sCols = do
               newR = if sCols then (l+ncol+1) else r
               newD = if sRows then (u+nrow+1) else d
           placeNoteToView noteId $ Box l newR u newD
+          updateFarBars
         _                -> return ()
 
 cursorOnScreen :: Sack Bool
