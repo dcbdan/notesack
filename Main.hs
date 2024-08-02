@@ -46,14 +46,19 @@ main = do args <- getArgs
             Left s  -> putStrLn s
             Right _ -> return ()
 
-mainExcept vty [filename] = do
+mainExcept vty [filename] = mainExcept vty [filename, ""]
+
+mainExcept vty [filename, maybeView] = do
   notesackSetup filename
   let initEnv = Env vty SackConfig
-  today <- liftIO getDate
-  initState <- getInitState today
+  view <- if maybeView == ""
+             then liftIO getDate
+             else return maybeView
+  initState <- getInitState view
   execRWST (drawSack >> sackInteract False) initEnv initState >> return ()
   closeDatabase
-mainExcept _ _ = throwError "Usage: notesack FILE"
+
+mainExcept _ _ = throwError "Usage: notesack FILE [OPTIONAL: INIT VIEW]"
 
 getInitState :: String -> ExceptM State
 getInitState viewId = do
