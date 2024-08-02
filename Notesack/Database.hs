@@ -258,18 +258,24 @@ getResizeNote view (cursorX, cursorY) =
         let [a,b,c] = map fromObjInt items
          in (a,b,c)
 
-      findCanPlace [] = throwError "could not place anything..."
+      findCanPlace [] = return []
       findCanPlace ((id,l,u):xs) = do
         success <- canPlace view id (Box l cursorX u cursorY)
+        rest <- findCanPlace xs
         if success
-          then return $ Just (id, (l,u))
-          else findCanPlace xs
+          then return $ (id, (l,u)):rest
+          else return $ rest
 
    in do notes <- map fix3Ints <$> getTable "TopLeftNotes" sqlTopLeftNotes sqlSchema3Ints
          case notes of
            [] -> return Nothing
            [(id,l,u)] -> return $ Just (id,(l,u))
-           xs -> findCanPlace xs
+           xs -> do ys <- findCanPlace xs
+                    case ys of
+                      []  -> return Nothing
+                      [y] -> return $ Just y
+                      _   -> return Nothing -- if multiple notes can be placed, it is ambiguous and
+                                            -- we don't know what to replace
 
 -- Get all tags except the date tags
 listTags :: ExceptM [String]
