@@ -100,6 +100,9 @@ handleNextEvent = askVty >>= liftIO . nextEvent >>= handleEvent
 
 handleEventMode :: Mode -> Event -> Sack Bool
 
+-- Ignore the tab character
+handleEventMode _ (EvKey (KChar '\t') []) = return False
+
 -- Just move the cursor
 handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "hjkl" =
   putMoveCursor (dirFromChar c) >> return False
