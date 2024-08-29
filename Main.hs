@@ -54,14 +54,20 @@ mainExcept vty [filename, maybeView] = do
   view <- if maybeView == ""
              then liftIO getDate
              else return maybeView
-  initState <- getInitState view
+  initState <- getInitState view False
   execRWST (drawSack >> sackInteract False) initEnv initState >> return ()
   closeDatabase
 
 mainExcept _ _ = throwError "Usage: notesack FILE [OPTIONAL: INIT VIEW]"
 
-getInitState :: String -> ExceptM State
-getInitState viewId = do
+putInitState :: String -> Sack ()
+putInitState viewId = do
+  withTagsOnScreen <- showTagsOnScreen <$> get
+  newState <- lift $ getInitState viewId withTagsOnScreen
+  put newState
+
+getInitState :: String -> Bool -> ExceptM State
+getInitState viewId withTagsOnScreen = do
   -- create the view if it doesn't already exist
   loadView viewId
   -- we need the location of the table view
@@ -84,6 +90,7 @@ getInitState viewId = do
         initWindowSize
         initNotesInView
         initFarBars
+        withTagsOnScreen
         ""
   return initState
 
@@ -306,6 +313,8 @@ data Command =
   | CommandResizeC Bool String
   | CommandResizeCorner Corner
   | CommandShrink Bool Bool
+  | CommandShowTags
+  | CommandHideTags
   | NoCommand
 
 parseCommand :: String -> Command
@@ -335,6 +344,8 @@ parseCommand (':':xs) = recurse $ words xs
         recurse ("shrink":[])    = CommandShrink True True
         recurse ("sr":[])        = CommandShrink True False
         recurse ("sc":[])        = CommandShrink False True
+        recurse ("show-tags":[]) = CommandShowTags
+        recurse ("hide-tags":[]) = CommandHideTags
         recurse ("ARCHIVE":[])   = CommandArchive
         recurse ("quit":[])      = CommandQuit
         recurse ("q":[])         = CommandQuit
@@ -359,6 +370,8 @@ runCommand commandStr = do
     CommandResizeC isPos sVal -> changeSelectedSize True "0" isPos sVal >> putMode BaseMode
     CommandResizeCorner cor   -> resizeSelected cor >> putMode BaseMode
     CommandShrink r c         -> shrinkSelected r c >> putMode BaseMode
+    CommandShowTags           -> showTags >> putMode BaseMode
+    CommandHideTags           -> hideTags >> putMode BaseMode
     NoCommand                 -> setStatusError "invalid command" >> putMode BaseMode
   case command of
     CommandQuit -> return True
@@ -367,8 +380,7 @@ runCommand commandStr = do
 switchView :: String -> Sack ()
 switchView newViewId = do
   saveViewInfo
-  newState <- lift $ getInitState newViewId
-  put newState
+  putInitState newViewId
 
 switchViewNextDay :: Sack ()
 switchViewNextDay = do
@@ -415,7 +427,7 @@ untagSelected maybeTagToRemove =
         -- if we just untagged a note from the current view, reset the screen
         if tagToRemove == viewId
            then do saveViewInfo
-                   lift (getInitState viewId) >>= put
+                   putInitState viewId
            else return ()
    in do tagToRemove <- case maybeTagToRemove of
                           Nothing -> getViewId
@@ -439,7 +451,7 @@ closeSelected =
                -- Option 2: just reinit
                -- Option 2.
                saveViewInfo
-               lift (getInitState viewId) >>= put
+               putInitState viewId
    in do viewId <- getViewId
          getSelected >>= f viewId
 
@@ -454,7 +466,7 @@ archiveSelected =
             lift $ tvnRemoveNote noteId
             -- 2) reinit
             saveViewInfo
-            lift (getInitState viewId) >>= put
+            putInitState viewId
    in do viewId <- getViewId
          getSelected >>= f viewId
 
@@ -640,13 +652,18 @@ drawSack = do
       tagImage = translate 0 (wy-2) $ I.string defAttr $ "Tag: " ++ viewId
   noteImages <- (map snd . notesInView) <$> get
 
-  allTags <- lift $ listTags
+  tagsForImage <- do
+    hasTags <- showTagsOnScreen <$> get
+    if hasTags
+      then lift $ listTags
+      else return []
+
   tagsOfSelected <- getSelectedTags
   let toRowTagAttr = defAttr `withForeColor` rgbColor 0 0 255 `withBackColor` rgbColor 235 235 235
       toRowTag t = if t `elem` tagsOfSelected
                      then I.string (toRowTagAttr `withStyle` bold) t
                      else I.string toRowTagAttr t
-  let barImage = I.vertCat (map toRowTag allTags)
+  let barImage = I.vertCat (map toRowTag tagsForImage)
 
   -- Shift status, tag, bar, and mode depending on the counts
   (lCnt,rCnt,uCnt,dCnt) <- farBars <$> get

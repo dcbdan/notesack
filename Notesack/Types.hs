@@ -4,7 +4,7 @@ module Notesack.Types (
   TableView(..), TableViewNote(..), TableNote(..),
   Dir(..), Corner(..), Pos, Id, Box(..),
   askVty, askSackConfig, getViewId, getViewLoc, getMode, putMode,
-  getStatusError, putStatusError,
+  getStatusError, putStatusError, showTags, hideTags,
   getCursor, putCursor, putMoveCursor, moveLoc, nullBox,
   throwErrorIf
 ) where
@@ -82,6 +82,7 @@ data State = State {
   windowSize :: (Int,Int),
   notesInView :: [(Id, Image)],
   farBars :: (Maybe Image, Maybe Image, Maybe Image, Maybe Image), -- (l,r,u,d)
+  showTagsOnScreen :: Bool,
   statusError :: String
 }
 
@@ -125,6 +126,16 @@ putMode :: Mode -> Sack ()
 putMode m = do
   state <- get
   put state{ mode = m }
+
+showTags :: Sack ()
+showTags = do
+  state <- get
+  put state{ showTagsOnScreen = True }
+
+hideTags :: Sack ()
+hideTags = do
+  state <- get
+  put state{ showTagsOnScreen = False }
 
 getCursor :: Sack (Pos, Pos)
 getCursor = cursor <$> get
