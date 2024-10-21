@@ -5,8 +5,8 @@ module Notesack.Types (
   Dir(..), Corner(..), Pos, Id, Box(..),
   askVty, askSackConfig, getViewId, getViewLoc, getMode, putMode,
   getStatusError, putStatusError, showTags, hideTags,
-  getCursor, putCursor, putMoveCursor, moveLoc, nullBox,
-  throwErrorIf
+  getCursor, putCursor, putMoveCursor, putMoveCursorWithStep, putStepSize,
+  moveLoc, moveLocWithStep, nullBox, throwErrorIf
 ) where
 
 import Control.Monad.RWS
@@ -79,6 +79,7 @@ data State = State {
   viewLoc :: (Pos,Pos),
   mode :: Mode,
   cursor :: (Pos,Pos),
+  stepSize :: Int,
   windowSize :: (Int,Int),
   notesInView :: [(Id, Image)],
   farBars :: (Maybe Image, Maybe Image, Maybe Image, Maybe Image), -- (l,r,u,d)
@@ -150,6 +151,16 @@ putMoveCursor direction = do
   state <- get
   put state{ cursor = moveLoc direction (cursor state) }
 
+putMoveCursorWithStep :: Dir -> Sack ()
+putMoveCursorWithStep direction = do
+  state <- get
+  put state{ cursor = moveLocWithStep (stepSize state) direction (cursor state) }
+
+putStepSize :: Int -> Sack ()
+putStepSize s = do
+  state <- get
+  put state{ stepSize = s }
+
 putStatusError :: String -> Sack ()
 putStatusError serr = do
   state <- get
@@ -159,10 +170,13 @@ getStatusError :: Sack String
 getStatusError = statusError <$> get
 
 moveLoc :: Dir -> (Pos,Pos) -> (Pos,Pos)
-moveLoc DirL (x,y) = (x-1,y)
-moveLoc DirR (x,y) = (x+1,y)
-moveLoc DirU (x,y) = (x,y-1)
-moveLoc DirD (x,y) = (x,y+1)
+moveLoc = moveLocWithStep 1
+
+moveLocWithStep :: Int -> Dir -> (Pos,Pos) -> (Pos,Pos)
+moveLocWithStep s DirL (x,y) = (x-s,y)
+moveLocWithStep s DirR (x,y) = (x+s,y)
+moveLocWithStep s DirU (x,y) = (x,y-s)
+moveLocWithStep s DirD (x,y) = (x,y+s)
 
 throwErrorIf :: Bool -> String -> Sack ()
 throwErrorIf True err = throwError err

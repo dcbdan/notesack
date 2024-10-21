@@ -26,7 +26,7 @@ import Notesack.Misc
 import Notesack.Boundary
 import Notesack.EditStr ( EditStr )
 import qualified Notesack.EditStr as E
-import Data.Char ( toLower )
+import Data.Char ( toLower, digitToInt )
 import Data.Tuple ( swap )
 import Data.Maybe ( catMaybes )
 import qualified Data.Array as A
@@ -54,7 +54,8 @@ mainExcept vty [filename, maybeView] = do
   view <- if maybeView == ""
              then liftIO getDate
              else return maybeView
-  initState <- getInitState view False
+  let startWithTagsOnScreen = True
+  initState <- getInitState view startWithTagsOnScreen
   execRWST (drawSack >> sackInteract False) initEnv initState >> return ()
   closeDatabase
 
@@ -82,11 +83,13 @@ getInitState viewId withTagsOnScreen = do
         if null unplacedNotes
            then BaseMode
            else PlaceMode unplacedNotes
+      stepSize = 1
       initState = State
         viewId
         loc
         initMode
         tvCursor
+        stepSize
         initWindowSize
         initNotesInView
         initFarBars
@@ -112,17 +115,22 @@ handleEventMode _ (EvKey (KChar '\t') []) = return False
 
 -- Just move the cursor
 handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "hjkl" =
-  putMoveCursor (dirFromChar c) >> return False
+  putMoveCursorWithStep (dirFromChar c) >> return False
+
+-- Set the step size
+handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "123456789" =
+  putStepSize (digitToInt c) >> return False
 
 -- Just move the view
 -- (I'd like to use the control modifier, but for some reason, vty
 --  wasn't picking up the ctrl + hkjl combo correctly for all of em)
 handleEventMode mode (EvKey (KChar c) []) | baseOrPlace mode && c `elem` "HJKL" =
   let dir = dirFromChar (toLower c)
-   in (moveLoc dir <$> getViewLoc)
-        >>= resetViewLoc
-        >>  unlessM cursorOnScreen (putMoveCursor dir)
-        >>  return False
+   in do step <- stepSize <$> get
+         (moveLocWithStep step dir <$> getViewLoc)
+           >>= resetViewLoc
+           >>  unlessM cursorOnScreen (putMoveCursorWithStep dir)
+           >>  return False
 
 -- Enter status mode
 handleEventMode BaseMode (EvKey (KChar ':') []) =
